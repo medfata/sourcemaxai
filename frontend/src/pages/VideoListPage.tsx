@@ -29,6 +29,8 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set())
   const [playlistsLoading, setPlaylistsLoading] = useState(false)
   const [resolvingPlaylists, setResolvingPlaylists] = useState(false)
+  const [playlistsError, setPlaylistsError] = useState<string | null>(null)
+  const [expansionError, setExpansionError] = useState<string | null>(null)
   const playlistsAttemptedRef = useRef(false)
 
   const longVideos = videos.filter((v) => !v.is_short)
@@ -54,6 +56,14 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   }, [channel.channel_id])
 
   useEffect(() => {
+    playlistsAttemptedRef.current = false
+    setPlaylists([])
+    setSelectedPlaylistIds(new Set())
+    setPlaylistsError(null)
+    setExpansionError(null)
+  }, [channel.channel_id])
+
+  useEffect(() => {
     const stored = localStorage.getItem(`cp_playlists_${channel.channel_id}`)
     if (stored) {
       try { setSelectedPlaylistIds(new Set(JSON.parse(stored))) } catch { /* ignore */ }
@@ -71,7 +81,13 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     if (tab === 'playlists' && !playlistsAttemptedRef.current) {
       playlistsAttemptedRef.current = true
       setPlaylistsLoading(true)
+      setPlaylistsError(null)
       api.playlists(channel.channel_id).then((res) => {
+        if (!res.ok) {
+          setPlaylistsError(res.error ?? 'Failed to load playlists')
+          setPlaylistsLoading(false)
+          return
+        }
         setPlaylists(res.data?.playlists ?? [])
         setPlaylistsLoading(false)
       })
@@ -101,16 +117,24 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     })
   }
 
-  const selectVideoSubset = (subset: Video[]) => {
-    const ids = subset.map((v) => v.id).slice(0, MAX_SELECTION)
-    persistSelection(new Set(ids))
+  const replaceSubsetSelection = (subset: Video[], newIds: Set<string>) => {
+    const subsetIdSet = new Set(subset.map((v) => v.id))
+    const preserved = Array.from(selectedIds).filter((id) => !subsetIdSet.has(id))
+    persistSelection(new Set([...preserved, ...newIds]))
   }
 
-  const selectNoneVideos = () => persistSelection(new Set())
+  const selectVideoSubset = (subset: Video[]) => {
+    const ids = subset.map((v) => v.id).slice(0, MAX_SELECTION)
+    replaceSubsetSelection(subset, new Set(ids))
+  }
+
+  const deselectSubset = (subset: Video[]) => {
+    replaceSubsetSelection(subset, new Set())
+  }
 
   const selectLast50 = (subset: Video[]) => {
     const ids = subset.slice(-50).map((v) => v.id)
-    persistSelection(new Set(ids))
+    replaceSubsetSelection(subset, new Set(ids))
   }
 
   const selectLastYear = (subset: Video[]) => {
@@ -119,7 +143,7 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     const cutoff =
       `${oneYearAgo.getFullYear()}${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}${String(oneYearAgo.getDate()).padStart(2, '0')}`
     const ids = subset.filter((v) => v.upload_date >= cutoff).map((v) => v.id).slice(0, MAX_SELECTION)
-    persistSelection(new Set(ids))
+    replaceSubsetSelection(subset, new Set(ids))
   }
 
   const selectAllPlaylists = () => {
@@ -130,19 +154,28 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     setSelectedPlaylistIds(new Set())
   }
 
-  const expandSelection = useCallback(async (): Promise<string[]> => {
+  const expandSelection = useCallback(async (): Promise<{ ids: string[]; error: string | null }> => {
     const expanded = new Set(selectedIds)
     for (const plId of selectedPlaylistIds) {
       const res = await api.playlistVideos(channel.channel_id, plId)
+      if (!res.ok) {
+        return { ids: [], error: `Failed to expand playlist "${plId}": ${res.error ?? 'Unknown error'}` }
+      }
       for (const vid of res.data?.video_ids ?? []) expanded.add(vid)
     }
-    return Array.from(expanded)
+    return { ids: Array.from(expanded), error: null }
   }, [channel.channel_id, selectedIds, selectedPlaylistIds])
 
   const handleRun = async () => {
     setResolvingPlaylists(true)
-    const expanded = await expandSelection()
-    await api.selectVideos(channel.channel_id, expanded)
+    setExpansionError(null)
+    const result = await expandSelection()
+    if (result.error) {
+      setExpansionError(result.error)
+      setResolvingPlaylists(false)
+      return
+    }
+    await api.selectVideos(channel.channel_id, result.ids)
     setResolvingPlaylists(false)
     onRunPipeline()
   }
@@ -164,7 +197,7 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     if (subset.length > 0) {
       quickActions = [
         { label: 'Select all', onClick: () => selectVideoSubset(subset) },
-        { label: 'Select none', onClick: selectNoneVideos },
+        { label: 'Select none', onClick: () => deselectSubset(subset) },
         { label: 'Last 50', onClick: () => selectLast50(subset) },
         { label: 'Last year', onClick: () => selectLastYear(subset) },
       ]
@@ -359,6 +392,10 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
               <div className="flex items-center justify-center py-20">
                 <p className="text-[15px] text-ios-text-secondary">Loading playlists…</p>
               </div>
+            ) : playlistsError ? (
+              <div className="flex items-center justify-center py-20">
+                <p className="text-[15px] text-ios-red">{playlistsError}</p>
+              </div>
             ) : playlists.length === 0 ? (
               <div className="flex items-center justify-center py-20">
                 <p className="text-[15px] text-ios-text-secondary">This channel has no public playlists.</p>
@@ -439,6 +476,9 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
             <span className="ml-1">total</span>
             {saving && <span className="ml-2 text-[12px]">Saving…</span>}
             {resolvingPlaylists && <span className="ml-2 text-[12px]">Resolving playlists…</span>}
+            {expansionError && (
+              <div className="mt-1 text-[13px] text-ios-red leading-tight">{expansionError}</div>
+            )}
           </div>
           <button
             onClick={handleRun}

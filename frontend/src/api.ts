@@ -1,4 +1,4 @@
-import type { ApiResponse, ChannelMeta, Profile, Selection, VideoList } from './types'
+import type { ApiResponse, ChannelMeta, PlaylistList, PlaylistVideos, Profile, Selection, VideoList } from './types'
 
 async function apiPost<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   const res = await fetch(path, {
@@ -31,4 +31,7 @@ export const api = {
   pipelineResume: (channelId: string) =>
     apiPost<{ channel_id: string; status: string }>('/api/pipeline/resume', { channel_id: channelId }),
   profile: (channelId: string) => apiGet<Profile>(`/api/profile?channel_id=${channelId}`),
+  playlists: (channelId: string) => apiGet<PlaylistList>(`/api/playlists?channel_id=${channelId}`),
+  playlistVideos: (channelId: string, playlistId: string) =>
+    apiGet<PlaylistVideos>(`/api/playlists/videos?channel_id=${channelId}&playlist_id=${playlistId}`),
 }

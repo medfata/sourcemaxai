@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { formatRelativeDate } from '../utils/date'
-import type { ChannelMeta, Video } from '../types'
+import type { ChannelMeta, Playlist, Video } from '../types'
 
 interface VideoListPageProps {
   channel: ChannelMeta
@@ -24,6 +24,16 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
+  const [playlists, setPlaylists] = useState<Playlist[]>([])
+  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set())
+  const [playlistsLoading, setPlaylistsLoading] = useState(false)
+  const [resolvingPlaylists, setResolvingPlaylists] = useState(false)
+  const playlistsAttemptedRef = useRef(false)
+
+  const longVideos = videos.filter((v) => !v.is_short)
+  const shortVideos = videos.filter((v) => v.is_short)
+
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -40,10 +50,33 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
       setLoading(false)
     }
     load()
-    return () => {
-      cancelled = true
+    return () => { cancelled = true }
+  }, [channel.channel_id])
+
+  useEffect(() => {
+    const stored = localStorage.getItem(`cp_playlists_${channel.channel_id}`)
+    if (stored) {
+      try { setSelectedPlaylistIds(new Set(JSON.parse(stored))) } catch { /* ignore */ }
     }
   }, [channel.channel_id])
+
+  useEffect(() => {
+    localStorage.setItem(
+      `cp_playlists_${channel.channel_id}`,
+      JSON.stringify(Array.from(selectedPlaylistIds)),
+    )
+  }, [selectedPlaylistIds, channel.channel_id])
+
+  useEffect(() => {
+    if (tab === 'playlists' && !playlistsAttemptedRef.current) {
+      playlistsAttemptedRef.current = true
+      setPlaylistsLoading(true)
+      api.playlists(channel.channel_id).then((res) => {
+        setPlaylists(res.data?.playlists ?? [])
+        setPlaylistsLoading(false)
+      })
+    }
+  }, [tab, channel.channel_id])
 
   const persistSelection = async (next: Set<string>) => {
     setSelectedIds(next)
@@ -59,28 +92,94 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     persistSelection(next)
   }
 
-  const selectAll = () => persistSelection(new Set(videos.map((v) => v.id).slice(0, MAX_SELECTION)))
-  const selectNone = () => persistSelection(new Set())
-  const selectLast50 = () => {
-    const ids = videos.slice(-50).map((v) => v.id)
+  const togglePlaylist = (id: string) => {
+    setSelectedPlaylistIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectVideoSubset = (subset: Video[]) => {
+    const ids = subset.map((v) => v.id).slice(0, MAX_SELECTION)
     persistSelection(new Set(ids))
   }
-  const selectLastYear = () => {
+
+  const selectNoneVideos = () => persistSelection(new Set())
+
+  const selectLast50 = (subset: Video[]) => {
+    const ids = subset.slice(-50).map((v) => v.id)
+    persistSelection(new Set(ids))
+  }
+
+  const selectLastYear = (subset: Video[]) => {
     const oneYearAgo = new Date()
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
-    const cutoff = `${oneYearAgo.getFullYear()}${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}${String(oneYearAgo.getDate()).padStart(2, '0')}`
-    const ids = videos.filter((v) => v.upload_date >= cutoff).map((v) => v.id).slice(0, MAX_SELECTION)
+    const cutoff =
+      `${oneYearAgo.getFullYear()}${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}${String(oneYearAgo.getDate()).padStart(2, '0')}`
+    const ids = subset.filter((v) => v.upload_date >= cutoff).map((v) => v.id).slice(0, MAX_SELECTION)
     persistSelection(new Set(ids))
   }
 
-  const selectedCount = selectedIds.size
-  const totalCount = videos.length
+  const selectAllPlaylists = () => {
+    setSelectedPlaylistIds(new Set(playlists.map((p) => p.id)))
+  }
 
-  const quickActions = [
-    { label: 'Select all', onClick: selectAll },
-    { label: 'Select none', onClick: selectNone },
-    { label: 'Last 50', onClick: selectLast50 },
-    { label: 'Last year', onClick: selectLastYear },
+  const selectNonePlaylists = () => {
+    setSelectedPlaylistIds(new Set())
+  }
+
+  const expandSelection = useCallback(async (): Promise<string[]> => {
+    const expanded = new Set(selectedIds)
+    for (const plId of selectedPlaylistIds) {
+      const res = await api.playlistVideos(channel.channel_id, plId)
+      for (const vid of res.data?.video_ids ?? []) expanded.add(vid)
+    }
+    return Array.from(expanded)
+  }, [channel.channel_id, selectedIds, selectedPlaylistIds])
+
+  const handleRun = async () => {
+    setResolvingPlaylists(true)
+    const expanded = await expandSelection()
+    await api.selectVideos(channel.channel_id, expanded)
+    setResolvingPlaylists(false)
+    onRunPipeline()
+  }
+
+  const selectedLongCount = longVideos.filter((v) => selectedIds.has(v.id)).length
+  const selectedShortCount = shortVideos.filter((v) => selectedIds.has(v.id)).length
+  const selectedPlaylistCount = selectedPlaylistIds.size
+  const optimisticTotal =
+    selectedIds.size +
+    playlists
+      .filter((p) => selectedPlaylistIds.has(p.id))
+      .reduce((sum, p) => sum + p.video_count, 0)
+
+  const hasSelection = selectedIds.size > 0 || selectedPlaylistIds.size > 0
+
+  let quickActions: { label: string; onClick: () => void }[] = []
+  if (tab === 'videos' || tab === 'shorts') {
+    const subset = tab === 'videos' ? longVideos : shortVideos
+    if (subset.length > 0) {
+      quickActions = [
+        { label: 'Select all', onClick: () => selectVideoSubset(subset) },
+        { label: 'Select none', onClick: selectNoneVideos },
+        { label: 'Last 50', onClick: () => selectLast50(subset) },
+        { label: 'Last year', onClick: () => selectLastYear(subset) },
+      ]
+    }
+  } else if (tab === 'playlists' && playlists.length > 0) {
+    quickActions = [
+      { label: 'Select all playlists', onClick: selectAllPlaylists },
+      { label: 'Select none', onClick: selectNonePlaylists },
+    ]
+  }
+
+  const tabs = [
+    { id: 'videos' as const, label: `Videos (${longVideos.length})` },
+    { id: 'playlists' as const, label: `Playlists (${playlists.length})` },
+    { id: 'shorts' as const, label: `Shorts (${shortVideos.length})` },
   ]
 
   if (loading) {
@@ -94,91 +193,228 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   return (
     <div className="pb-24">
       {/* Header */}
-      <div className="max-w-5xl mx-auto px-4 py-4">
+      <div className="max-w-5xl mx-auto px-4 pt-4 pb-1">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
             {channel.avatar_url && (
-              <img
-                src={channel.avatar_url}
-                alt=""
-                className="w-10 h-10 rounded-full object-cover"
-              />
+              <img src={channel.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
             )}
             <div>
               <h2 className="text-[17px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
                 {channel.channel_name}
               </h2>
               <p className="text-[13px] text-ios-text-secondary">
-                {totalCount} videos
+                {videos.length} videos
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {quickActions.map((action) => (
-              <button
-                key={action.label}
-                onClick={action.onClick}
-                className="px-3.5 h-8 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[13px] text-ios-blue font-medium active:opacity-70 transition"
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
+          {quickActions.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {quickActions.map((action) => (
+                <button
+                  key={action.label}
+                  onClick={action.onClick}
+                  className="px-3.5 h-8 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[13px] text-ios-blue font-medium active:opacity-70 transition"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Video Grid */}
+      {/* Tab bar */}
+      <div className="max-w-5xl mx-auto px-4 py-3 sticky top-0 z-30 bg-ios-bg dark:bg-black">
+        <div className="flex gap-1 p-1 bg-black/[0.05] dark:bg-white/[0.08] rounded-full w-fit">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-4 h-8 rounded-full text-[13px] font-medium transition-all ${
+                tab === t.id
+                  ? 'bg-ios-blue text-white shadow-sm'
+                  : 'text-ios-text-secondary active:opacity-70'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content Grid */}
       <div className="max-w-5xl mx-auto px-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {videos.map((video) => {
-            const isSelected = selectedIds.has(video.id)
-            return (
-              <div
-                key={video.id}
-                onClick={() => toggleVideo(video.id)}
-                className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
-                  isSelected ? 'ring-[3px] ring-ios-blue' : ''
-                }`}
-              >
-                <div className="relative aspect-video">
-                  <img
-                    src={video.thumbnail}
-                    alt={video.title}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[11px] font-medium">
-                    {formatDuration(video.duration)}
-                  </div>
-                  {/* Checkbox */}
-                  <div className="absolute top-2 right-2">
+        {tab === 'videos' && (
+          <>
+            {longVideos.length === 0 ? (
+              <div className="flex items-center justify-center py-20">
+                <p className="text-[15px] text-ios-text-secondary">No long-form videos on this channel.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {longVideos.map((video) => {
+                  const isSelected = selectedIds.has(video.id)
+                  return (
                     <div
-                      className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        isSelected
-                          ? 'bg-ios-blue border-ios-blue'
-                          : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
+                      key={video.id}
+                      onClick={() => toggleVideo(video.id)}
+                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
+                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
                       }`}
                     >
-                      {isSelected && (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
+                      <div className="relative aspect-video">
+                        <img src={video.thumbnail} alt={video.title} loading="lazy"
+                          className="w-full h-full object-cover" />
+                        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[11px] font-medium">
+                          {formatDuration(video.duration)}
+                        </div>
+                        <div className="absolute top-2 right-2">
+                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                            isSelected
+                              ? 'bg-ios-blue border-ios-blue'
+                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
+                          }`}>
+                            {isSelected && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
+                          {video.title}
+                        </h3>
+                        <p className="mt-1 text-[12px] text-ios-text-secondary">
+                          {formatRelativeDate(video.upload_date)}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <div className="p-3">
-                  <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
-                    {video.title}
-                  </h3>
-                  <p className="mt-1 text-[12px] text-ios-text-secondary">
-                    {formatRelativeDate(video.upload_date)}
-                  </p>
-                </div>
+                  )
+                })}
               </div>
-            )
-          })}
-        </div>
+            )}
+          </>
+        )}
+
+        {tab === 'shorts' && (
+          <>
+            {shortVideos.length === 0 ? (
+              <div className="flex items-center justify-center py-20">
+                <p className="text-[15px] text-ios-text-secondary">No Shorts on this channel.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {shortVideos.map((video) => {
+                  const isSelected = selectedIds.has(video.id)
+                  return (
+                    <div
+                      key={video.id}
+                      onClick={() => toggleVideo(video.id)}
+                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
+                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
+                      }`}
+                    >
+                      <div className="relative aspect-[9/16]">
+                        <img src={video.thumbnail} alt={video.title} loading="lazy"
+                          className="w-full h-full object-cover" />
+                        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[11px] font-medium">
+                          {formatDuration(video.duration)}
+                        </div>
+                        <div className="absolute top-2 right-2">
+                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                            isSelected
+                              ? 'bg-ios-blue border-ios-blue'
+                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
+                          }`}>
+                            {isSelected && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
+                          {video.title}
+                        </h3>
+                        <p className="mt-1 text-[12px] text-ios-text-secondary">
+                          {formatRelativeDate(video.upload_date)}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'playlists' && (
+          <>
+            {playlistsLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <p className="text-[15px] text-ios-text-secondary">Loading playlists…</p>
+              </div>
+            ) : playlists.length === 0 ? (
+              <div className="flex items-center justify-center py-20">
+                <p className="text-[15px] text-ios-text-secondary">This channel has no public playlists.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {playlists.map((playlist) => {
+                  const isSelected = selectedPlaylistIds.has(playlist.id)
+                  return (
+                    <div
+                      key={playlist.id}
+                      onClick={() => togglePlaylist(playlist.id)}
+                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
+                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
+                      }`}
+                    >
+                      <div className="relative aspect-video bg-black/10 dark:bg-white/10 flex items-center justify-center">
+                        {playlist.thumbnail ? (
+                          <img src={playlist.thumbnail} alt={playlist.title} loading="lazy"
+                            className="w-full h-full object-cover" />
+                        ) : (
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+                            className="text-black/20 dark:text-white/20">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <line x1="9" y1="3" x2="9" y2="21" />
+                          </svg>
+                        )}
+                        <div className="absolute top-2 right-2">
+                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                            isSelected
+                              ? 'bg-ios-blue border-ios-blue'
+                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
+                          }`}>
+                            {isSelected && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
+                          {playlist.title}
+                        </h3>
+                        <p className="mt-1 text-[12px] text-ios-text-secondary">
+                          {playlist.video_count} videos
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Sticky bottom bar */}
@@ -186,20 +422,33 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="text-[15px] text-ios-text-secondary">
             <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-              {selectedCount}
-            </span>{' '}
-            of {totalCount} selected
+              V {selectedLongCount}
+            </span>
+            <span className="mx-1">·</span>
+            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
+              S {selectedShortCount}
+            </span>
+            <span className="mx-1">·</span>
+            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
+              P {selectedPlaylistCount}
+            </span>
+            <span className="mx-1">·</span>
+            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
+              T {optimisticTotal}
+            </span>
+            <span className="ml-1">total</span>
             {saving && <span className="ml-2 text-[12px]">Saving…</span>}
+            {resolvingPlaylists && <span className="ml-2 text-[12px]">Resolving playlists…</span>}
           </div>
           <button
-            onClick={onRunPipeline}
-            disabled={selectedCount === 0}
+            onClick={handleRun}
+            disabled={!hasSelection || resolvingPlaylists}
             className="px-6 h-[44px] rounded-2xl bg-ios-blue text-white font-semibold text-[15px] active:scale-[0.98] active:opacity-90 transition disabled:opacity-40 disabled:active:scale-100"
           >
-            Run pipeline
+            {resolvingPlaylists ? 'Resolving playlists…' : 'Run pipeline'}
           </button>
         </div>
-        {selectedCount > MAX_SELECTION && (
+        {(selectedIds.size > MAX_SELECTION || optimisticTotal > MAX_SELECTION) && (
           <div className="max-w-5xl mx-auto px-4 pb-2">
             <p className="text-[13px] text-ios-yellow">
               {MAX_SELECTION}+ videos selected — pipeline may be slow and expensive

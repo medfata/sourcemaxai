@@ -26,13 +26,13 @@ class ChannelMeta(BaseModel):
 
 class Video(BaseModel):
     """A single video entry from a channel."""
-
     id: str
     title: str
     upload_date: str
     duration: int
     view_count: int
     thumbnail: str
+    is_short: bool = False
 
 
 class VideoList(BaseModel):
@@ -40,6 +40,26 @@ class VideoList(BaseModel):
 
     channel_id: str
     videos: list[Video]
+
+
+class Playlist(BaseModel):
+    """A YouTube playlist."""
+    id: str
+    title: str
+    video_count: int
+    thumbnail: str | None = None
+
+
+class PlaylistList(BaseModel):
+    """List of playlists for a channel."""
+    channel_id: str
+    playlists: list[Playlist]
+
+
+class PlaylistVideos(BaseModel):
+    """Video IDs belonging to a single playlist."""
+    playlist_id: str
+    video_ids: list[str]
 
 
 class ChannelUrlPayload(BaseModel):

@@ -108,17 +108,66 @@ def fetch_channel_videos(channel_url: str) -> list[dict[str, Any]]:
         upload_date = info.get("upload_date")
         duration = info.get("duration") or 0
         view_count = info.get("view_count") or 0
+        duration_val = int(duration) if duration else 0
         videos.append(
             {
                 "id": vid,
                 "title": info.get("title", "Untitled"),
                 "upload_date": upload_date if upload_date and upload_date != "19700101" else "",
-                "duration": int(duration) if duration else 0,
+                "duration": duration_val,
                 "view_count": int(view_count) if view_count else 0,
                 "thumbnail": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+                "is_short": 0 < duration_val <= 60,
             }
         )
 
     # Sort by date if available; undated videos go to the end
     videos.sort(key=lambda v: v["upload_date"] or "99991231")
     return videos
+
+
+def fetch_channel_playlists(channel_url: str) -> list[dict[str, Any]]:
+    """Return every public playlist on the channel as a list of dicts.
+
+    Each dict contains: id, title, video_count, thumbnail.
+    Runs yt-dlp --flat-playlist --dump-json against <channel_url>/playlists.
+    """
+    url = channel_url.rstrip("/") + "/playlists"
+    stdout = _run_ytdlp(["--flat-playlist", "--dump-json", url])
+    playlists: list[dict[str, Any]] = []
+    for line in stdout.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        info = json.loads(line)
+        plid = info.get("id")
+        if not plid:
+            continue
+        video_count = info.get("playlist_count") or info.get("video_count") or info.get("n_entries") or 0
+        thumbnail = None
+        thumbnails = info.get("thumbnails")
+        if thumbnails and len(thumbnails) > 0:
+            thumbnail = thumbnails[-1].get("url")
+        playlists.append({
+            "id": plid,
+            "title": info.get("title", "Untitled"),
+            "video_count": int(video_count),
+            "thumbnail": thumbnail,
+        })
+    return playlists
+
+
+def fetch_playlist_video_ids(playlist_id: str) -> list[str]:
+    """Return all video IDs in a playlist.
+
+    URL format: https://www.youtube.com/playlist?list=<playlist_id>
+    Uses --flat-playlist --print '%(id)s' for speed.
+    """
+    url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    stdout = _run_ytdlp(["--flat-playlist", "--print", "%(id)s", url])
+    ids: list[str] = []
+    for line in stdout.strip().splitlines():
+        line = line.strip()
+        if line:
+            ids.append(line)
+    return ids

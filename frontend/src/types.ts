@@ -18,6 +18,24 @@ export interface Video {
   duration: number
   view_count: number
   thumbnail: string
+  is_short: boolean
+}
+
+export interface Playlist {
+  id: string
+  title: string
+  video_count: number
+  thumbnail: string | null
+}
+
+export interface PlaylistList {
+  channel_id: string
+  playlists: Playlist[]
+}
+
+export interface PlaylistVideos {
+  playlist_id: string
+  video_ids: string[]
 }
 
 export interface VideoList {
@@ -76,15 +94,25 @@ export interface ProfileDateRange {
   last: string | null
 }
 
+export interface Evidence {
+  start_seconds: number
+  quote: string
+}
+
+export interface Claim {
+  text: string
+  evidence: Evidence[]
+}
+
 export interface ProfileVideo {
   video_id: string
   title: string
   upload_date: string
   core_topic: string
-  key_claims: string[]
+  key_claims: Claim[]
   recurring_themes: string[]
   tone_markers: string[]
-  notable_opinions: string[]
+  notable_opinions: Claim[]
   people_or_things_referenced: string[]
 }
 

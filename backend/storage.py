@@ -60,11 +60,30 @@ def save_videos(channel_id: str, videos: list[dict]) -> None:
 
 
 def load_selection(channel_id: str) -> list[str] | None:
-    """Load selection.json if it exists."""
     data = read_json(get_channel_dir(channel_id) / "selection.json")
     return data.get("video_ids") if isinstance(data, dict) else None
 
 
 def save_selection(channel_id: str, video_ids: list[str]) -> None:
-    """Persist selection.json."""
     write_json(get_channel_dir(channel_id) / "selection.json", {"video_ids": video_ids})
+
+
+def load_playlists(channel_id: str) -> list[dict] | None:
+    data = read_json(get_channel_dir(channel_id) / "playlists.json")
+    return data.get("playlists") if isinstance(data, dict) else None
+
+
+def save_playlists(channel_id: str, playlists: list[dict]) -> None:
+    write_json(get_channel_dir(channel_id) / "playlists.json", {"playlists": playlists})
+
+
+def load_playlist_video_ids(channel_id: str, playlist_id: str) -> list[str] | None:
+    data = read_json(get_channel_dir(channel_id) / "playlist_videos" / f"{playlist_id}.json")
+    return data.get("video_ids") if isinstance(data, dict) else None
+
+
+def save_playlist_video_ids(channel_id: str, playlist_id: str, video_ids: list[str]) -> None:
+    write_json(
+        get_channel_dir(channel_id) / "playlist_videos" / f"{playlist_id}.json",
+        {"video_ids": video_ids},
+    )

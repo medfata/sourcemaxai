@@ -418,6 +418,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [showAllReferenced, setShowAllReferenced] = useState(false)
   const [showAllThemes, setShowAllThemes] = useState(false)
+  const [moreStatsOpen, setMoreStatsOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -619,40 +620,12 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
             </Card>
           </div>
           <div>
-            <SectionHeader>Tone mix</SectionHeader>
-            <Card>
-              {toneEntries.length < 3 ? (
-                <div className="space-y-3">
-                  {toneEntries.map(([tone, count]) => (
-                    <ToneBar key={tone} label={tone} count={count} maxCount={maxToneCount} />
-                  ))}
-                </div>
-              ) : (
-                <ToneDonutChart tones={toneEntries} />
-              )}
-            </Card>
-          </div>
-        </div>
-
-        {/* Upload Activity */}
-        {monthlyCounts.length >= 2 && (
-          <div>
-            <SectionHeader>Activity over time</SectionHeader>
-            <Card>
-              <UploadActivityChart data={monthlyCounts} />
-            </Card>
-          </div>
-        )}
-
-        {/* People & Things Card */}
-        {profile.rollups.all_referenced.length > 0 && (
-          <div>
             <SectionHeader>Frequently referenced</SectionHeader>
             <Card>
               <div className="flex flex-wrap gap-2">
                 {(showAllReferenced
                   ? profile.rollups.all_referenced
-                  : profile.rollups.all_referenced.slice(0, 10)
+                  : profile.rollups.all_referenced.slice(0, 8)
                 ).map((r) => (
                   <ReferencedPill
                     key={r.name}
@@ -662,7 +635,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
                   />
                 ))}
               </div>
-              {profile.rollups.all_referenced.length > 10 && (
+              {profile.rollups.all_referenced.length > 8 && (
                 <button
                   onClick={() => setShowAllReferenced(v => !v)}
                   className="mt-3 text-[13px] text-ios-blue font-medium hover:underline"
@@ -674,7 +647,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
               )}
             </Card>
           </div>
-        )}
+        </div>
 
         {/* Timeline Card */}
         <div>
@@ -701,6 +674,41 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
                 ))
               )}
             </Card>
+          )}
+        </div>
+
+        {/* More stats */}
+        <div>
+          <button
+            onClick={() => setMoreStatsOpen(o => !o)}
+            className="w-full flex items-center justify-between mb-3"
+          >
+            <SectionHeader className="mb-0">More stats</SectionHeader>
+            <span className="text-[13px] text-ios-text-secondary">
+              {moreStatsOpen ? '▾' : '▸'}
+            </span>
+          </button>
+          {moreStatsOpen && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <p className="text-[13px] text-ios-text-secondary mb-2">Tone mix</p>
+                {toneEntries.length < 3 ? (
+                  <div className="space-y-3">
+                    {toneEntries.map(([tone, count]) => (
+                      <ToneBar key={tone} label={tone} count={count} maxCount={maxToneCount} />
+                    ))}
+                  </div>
+                ) : (
+                  <ToneDonutChart tones={toneEntries} />
+                )}
+              </Card>
+              {monthlyCounts.length >= 2 && (
+                <Card>
+                  <p className="text-[13px] text-ios-text-secondary mb-2">Activity over time</p>
+                  <UploadActivityChart data={monthlyCounts} />
+                </Card>
+              )}
+            </div>
           )}
         </div>
 

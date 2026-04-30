@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import type { ChannelMeta } from '../types'
 import { useSSE } from '../hooks/useSSE'
+import ProgressStats from '../components/ProgressStats'
+import LiveActivityPanel from '../components/LiveActivityPanel'
+import type { ActivityItem } from '../components/LiveActivityPanel'
 
 interface TranscriptProgressPageProps {
   channel: ChannelMeta
@@ -61,6 +64,9 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
   const { state } = useSSE(channel.channel_id)
   const [baseVideos, setBaseVideos] = useState<VideoRow[]>([])
   const [initialized, setInitialized] = useState(false)
+  const [activityLog, setActivityLog] = useState<ActivityItem[]>([])
+  const lastStatusRef = useRef<Record<string, string>>({})
+  const [videoListOpen, setVideoListOpen] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -81,6 +87,7 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
           status: 'queued' as VideoStatus,
         }))
       setBaseVideos(rows)
+      if (rows.length > 30) setVideoListOpen(false)
       setInitialized(true)
     }
     load()
@@ -108,7 +115,33 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
 
   const total = videos.length
   const completed = videos.filter((v) => terminalStatuses.has(v.status)).length
+  const doneCount = videos.filter((v) => v.status === 'done').length
+  const failedCount = videos.filter((v) => v.status === 'failed').length
+  const unavailableCount = videos.filter((v) => v.status === 'unavailable').length
   const progress = total > 0 ? (completed / total) * 100 : 0
+
+  const activeItems: ActivityItem[] = useMemo(() =>
+    videos
+      .filter((v) => v.status === 'fetching')
+      .map((v) => ({ videoId: v.id, title: v.title, status: 'fetching' as const, ts: 0 })),
+    [videos]
+  )
+
+  useEffect(() => {
+    const newEntries: ActivityItem[] = []
+    for (const v of videos) {
+      const prev = lastStatusRef.current[v.id]
+      if (prev !== v.status) {
+        lastStatusRef.current[v.id] = v.status
+        if (terminalStatuses.has(v.status)) {
+          newEntries.push({ videoId: v.id, title: v.title, status: v.status as ActivityItem['status'], ts: Date.now() })
+        }
+      }
+    }
+    if (newEntries.length > 0) {
+      setActivityLog((prev) => [...newEntries, ...prev].slice(0, 8))
+    }
+  }, [videos])
 
   const handleComplete = useCallback(() => {
     onComplete()
@@ -163,39 +196,72 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
           </button>
         </div>
 
+        {/* Stats strip */}
+        <ProgressStats
+          total={total}
+          done={doneCount}
+          failed={failedCount}
+          unavailable={unavailableCount}
+          startedAt={state?.started_at}
+        />
+
         {/* Progress bar */}
-        <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-6">
+        <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden my-4">
           <div
             className="h-full bg-ios-blue transition-all duration-500 rounded-full"
             style={{ width: `${progress}%` }}
           />
         </div>
 
-        {/* Video rows */}
-        <div className="bg-white dark:bg-ios-card-dark rounded-xl overflow-hidden">
-          {videos.map((video, index) => (
-            <div
-              key={video.id}
-              className={`flex items-center gap-3 p-3 ${
-                index < videos.length - 1
-                  ? 'border-b border-black/[0.04] dark:border-white/[0.06]'
-                  : ''
-              }`}
-            >
-              <img
-                src={video.thumbnail}
-                alt=""
-                className="w-20 h-[45px] object-cover flex-shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark truncate">
-                  {video.title}
-                </p>
-                <p className="text-[11px] text-ios-text-secondary font-mono mt-0.5">{video.id}</p>
-              </div>
-              <StatusPill status={video.status} />
+        {/* Live activity */}
+        <div className="mb-4">
+          <LiveActivityPanel
+            activeItems={activeItems}
+            recentLog={activityLog}
+            verb="Fetching"
+          />
+        </div>
+
+        {/* Collapsible video list */}
+        <div>
+          <button
+            onClick={() => setVideoListOpen((o) => !o)}
+            className="w-full flex items-center justify-between mb-2"
+          >
+            <span className="text-[15px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
+              All videos ({total})
+            </span>
+            <span className="text-[13px] text-ios-text-secondary">
+              {videoListOpen ? '▾' : '▸'}
+            </span>
+          </button>
+          {videoListOpen && (
+            <div className="bg-white dark:bg-ios-card-dark rounded-xl overflow-hidden">
+              {videos.map((video, index) => (
+                <div
+                  key={video.id}
+                  className={`flex items-center gap-3 p-3 ${
+                    index < videos.length - 1
+                      ? 'border-b border-black/[0.04] dark:border-white/[0.06]'
+                      : ''
+                  }`}
+                >
+                  <img
+                    src={video.thumbnail}
+                    alt=""
+                    className="w-20 h-[45px] object-cover flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark truncate">
+                      {video.title}
+                    </p>
+                    <p className="text-[11px] text-ios-text-secondary font-mono mt-0.5">{video.id}</p>
+                  </div>
+                  <StatusPill status={video.status} />
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

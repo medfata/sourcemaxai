@@ -24,6 +24,7 @@ function App() {
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen)
   const [channel, setChannel] = useState<ChannelMeta | null>(null)
   const [stages, setStages] = useState<Stage[]>(STAGES)
+  const [chatSeed, setChatSeed] = useState<string | undefined>()
 
   const channelId = channel?.channel_id ?? null
   const { state: pipelineState } = useSSE(channelId)
@@ -205,7 +206,8 @@ function App() {
     }
   }
 
-  const handleStartChat = () => {
+  const handleStartChat = (seed?: string) => {
+    setChatSeed(seed)
     setScreen('chat')
     setStages((prev) =>
       prev.map((s) =>
@@ -246,7 +248,7 @@ function App() {
         <ProfilePage channel={channel} onBack={() => setScreen('video_list')} onStartChat={handleStartChat} />
       )}
       {screen === 'chat' && channel && (
-        <ChatPage channel={channel} onBack={() => setScreen('profile')} onComplete={handleChatComplete} />
+        <ChatPage channel={channel} onBack={() => setScreen('profile')} onComplete={handleChatComplete} initialInput={chatSeed} />
       )}
     </div>
   )

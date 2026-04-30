@@ -1,12 +1,111 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChannelMeta, ChatMessage } from '../types'
+
+const isYouTubeCitationHref = (href: unknown): href is string =>
+  typeof href === 'string' &&
+  /(?:youtu\.be|youtube\.com)/.test(href) &&
+  /[?&]t=/.test(href)
+
+const markdownComponents: Components = {
+  a: ({ node: _node, href, children, ...props }) => {
+    if (isYouTubeCitationHref(href)) {
+      return (
+        <a
+          {...props}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[12px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/20 rounded-md px-1.5 py-0.5 mx-0.5 no-underline transition-colors box-decoration-clone break-words"
+        >
+          {children}
+        </a>
+      )
+    }
+    return (
+      <a
+        {...props}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-ios-blue underline underline-offset-2"
+      >
+        {children}
+      </a>
+    )
+  },
+  h1: ({ node: _node, ...props }) => (
+    <h1 className="text-[22px] font-bold tracking-tight mt-4 mb-2 first:mt-0" {...props} />
+  ),
+  h2: ({ node: _node, ...props }) => (
+    <h2 className="text-[19px] font-semibold tracking-tight mt-4 mb-2 first:mt-0" {...props} />
+  ),
+  h3: ({ node: _node, ...props }) => (
+    <h3 className="text-[17px] font-semibold tracking-tight mt-3 mb-1.5 first:mt-0" {...props} />
+  ),
+  p: ({ node: _node, ...props }) => (
+    <p className="my-2 first:mt-0 last:mb-0 leading-[1.55]" {...props} />
+  ),
+  ul: ({ node: _node, ...props }) => (
+    <ul className="list-disc pl-5 my-2 first:mt-0 last:mb-0 space-y-1" {...props} />
+  ),
+  ol: ({ node: _node, ...props }) => (
+    <ol className="list-decimal pl-5 my-2 first:mt-0 last:mb-0 space-y-1" {...props} />
+  ),
+  li: ({ node: _node, ...props }) => <li className="leading-[1.5]" {...props} />,
+  strong: ({ node: _node, ...props }) => <strong className="font-semibold" {...props} />,
+  em: ({ node: _node, ...props }) => <em className="italic" {...props} />,
+  blockquote: ({ node: _node, ...props }) => (
+    <blockquote
+      className="border-l-2 border-ios-blue/40 pl-3 my-2 text-ios-text-secondary italic"
+      {...props}
+    />
+  ),
+  hr: () => <hr className="my-3 border-t border-ios-separator/60" />,
+  code: ({ node: _node, className, children, ...props }) => {
+    const isBlock = typeof className === 'string' && className.startsWith('language-')
+    if (isBlock) {
+      return (
+        <code
+          className="block bg-black/5 dark:bg-white/10 rounded-xl p-3 my-2 text-[13px] font-mono overflow-x-auto"
+          {...props}
+        >
+          {children}
+        </code>
+      )
+    }
+    return (
+      <code
+        className="bg-black/[0.06] dark:bg-white/[0.10] rounded px-1 py-0.5 text-[13px] font-mono"
+        {...props}
+      >
+        {children}
+      </code>
+    )
+  },
+  pre: ({ node: _node, ...props }) => <pre className="my-2" {...props} />,
+  table: ({ node: _node, ...props }) => (
+    <div className="my-2 overflow-x-auto">
+      <table className="w-full text-[13px] border-collapse" {...props} />
+    </div>
+  ),
+  th: ({ node: _node, ...props }) => (
+    <th
+      className="text-left font-semibold border-b border-ios-separator px-2 py-1.5"
+      {...props}
+    />
+  ),
+  td: ({ node: _node, ...props }) => (
+    <td className="border-b border-ios-separator/40 px-2 py-1.5 align-top" {...props} />
+  ),
+}
 
 interface ChatPageProps {
   channel: ChannelMeta
   onBack: () => void
   onComplete?: () => void
+  initialInput?: string
 }
 
 const SUGGESTED_PROMPTS = [
@@ -66,12 +165,20 @@ async function* sseStream(response: Response): AsyncGenerator<string, void, unkn
   }
 }
 
-export default function ChatPage({ channel, onBack, onComplete }: ChatPageProps) {
+export default function ChatPage({ channel, onBack, onComplete, initialInput }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [input, setInput] = useState("")
   const [error, setError] = useState<string | null>(null)
   const completedRef = useRef(false)
+  const seedAppliedRef = useRef(false)
+
+  useEffect(() => {
+    if (initialInput && !seedAppliedRef.current) {
+      setInput(initialInput)
+      seedAppliedRef.current = true
+    }
+  }, [initialInput])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
@@ -295,22 +402,15 @@ export default function ChatPage({ channel, onBack, onComplete }: ChatPageProps)
             }`}
           >
             <div
-              className={`max-w-[80%] px-4 py-2.5 text-[15px] leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-ios-blue text-white rounded-3xl rounded-br-md whitespace-pre-wrap"
-                    : "bg-ios-bubble dark:bg-gray-800 text-ios-text-primary dark:text-ios-text-primary-dark rounded-3xl rounded-bl-md"
-              }`}
+              className={
+                msg.role === "user"
+                  ? "max-w-[88%] sm:max-w-[680px] px-4 py-3 text-[15px] leading-[1.55] bg-ios-blue text-white rounded-3xl rounded-br-md whitespace-pre-wrap break-words"
+                  : "max-w-[92%] sm:max-w-[720px] lg:max-w-[860px] xl:max-w-[960px] px-4 py-3 text-[15px] leading-[1.55] bg-ios-bubble dark:bg-gray-800 text-ios-text-primary dark:text-ios-text-primary-dark rounded-3xl rounded-bl-md break-words"
+              }
             >
               {msg.role === "assistant" ? (
                 msg.content ? (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      a: ({ node, ...props }) => (
-                        <a {...props} target="_blank" rel="noopener noreferrer" className="text-ios-blue underline" />
-                      ),
-                    }}
-                  >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {msg.content}
                   </ReactMarkdown>
                 ) : streaming && idx === messages.length - 1 ? (

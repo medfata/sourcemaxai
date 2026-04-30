@@ -134,10 +134,10 @@ function ThemesBarChart({
               if (theme) onThemeClick(theme)
             }}
           >
-            {data.map((entry) => (
+            {data.map((entry, index) => (
               <Cell
                 key={entry.name}
-                fill={selectedThemes.has(entry.name) ? CHART_COLORS[0] : '#8e8e93'}
+                fill={selectedThemes.has(entry.name) ? CHART_COLORS[0] : CHART_COLORS[index % CHART_COLORS.length]}
                 opacity={selectedThemes.size === 0 || selectedThemes.has(entry.name) ? 1 : 0.4}
               />
             ))}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import type { ChannelMeta, Profile, ProfileVideo, ThemeCount } from '../types'
-import { formatMonthYear, formatShortDate } from '../utils/date'
+import { formatMonthYear, formatShortDate, formatTimestamp } from '../utils/date'
 
 interface ProfilePageProps {
   channel: ChannelMeta
@@ -106,6 +106,38 @@ function ToneBar({ label, count, maxCount }: { label: string; count: number; max
   )
 }
 
+function CitationPill({ videoId, startSeconds }: { videoId: string; startSeconds: number }) {
+  return (
+    <a
+      href={`https://youtu.be/${videoId}?t=${startSeconds}s`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center text-[11px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/20 rounded-full px-2 py-0.5 ml-1 mr-0.5 align-baseline no-underline transition-colors whitespace-nowrap"
+    >
+      ↗ {formatTimestamp(startSeconds)}
+    </a>
+  )
+}
+
+function ClaimItem({
+  text,
+  evidence,
+  videoId,
+}: {
+  text: string
+  evidence: { start_seconds: number; quote: string }[]
+  videoId: string
+}) {
+  return (
+    <li>
+      <span>{text}</span>
+      {evidence.map((ev, i) => (
+        <CitationPill key={i} videoId={videoId} startSeconds={ev.start_seconds} />
+      ))}
+    </li>
+  )
+}
+
 function TimelineRow({
   video,
   index,
@@ -168,9 +200,14 @@ function TimelineRow({
               <p className="text-[12px] font-semibold text-ios-text-secondary uppercase tracking-wider mb-1">
                 Key claims
               </p>
-              <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-0.5">
+              <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-1">
                 {video.key_claims.map((claim, i) => (
-                  <li key={i}>{claim}</li>
+                  <ClaimItem
+                    key={i}
+                    text={claim.text}
+                    evidence={claim.evidence}
+                    videoId={video.video_id}
+                  />
                 ))}
               </ul>
             </div>
@@ -197,9 +234,14 @@ function TimelineRow({
               <p className="text-[12px] font-semibold text-ios-text-secondary uppercase tracking-wider mb-1">
                 Notable opinions
               </p>
-              <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-0.5">
+              <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-1">
                 {video.notable_opinions.map((op, i) => (
-                  <li key={i}>{op}</li>
+                  <ClaimItem
+                    key={i}
+                    text={op.text}
+                    evidence={op.evidence}
+                    videoId={video.video_id}
+                  />
                 ))}
               </ul>
             </div>
@@ -232,6 +274,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set())
+  const [timelineOpen, setTimelineOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -244,6 +287,9 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
       }
       if (res.data) {
         setProfile(res.data)
+        if (res.data.videos.length <= 30) {
+          setTimelineOpen(true)
+        }
       }
       setLoading(false)
     })
@@ -251,6 +297,10 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
       cancelled = true
     }
   }, [channel.channel_id])
+
+  useEffect(() => {
+    if (selectedThemes.size > 0) setTimelineOpen(true)
+  }, [selectedThemes])
 
   const toggleTheme = (theme: string) => {
     setSelectedThemes((prev) => {
@@ -404,24 +454,30 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
 
         {/* Timeline Card */}
         <div>
-          <div className="flex items-baseline justify-between mb-3">
+          <button
+            onClick={() => setTimelineOpen(o => !o)}
+            className="w-full flex items-center justify-between mb-3"
+          >
             <SectionHeader className="mb-0">Timeline</SectionHeader>
             <span className="text-[13px] text-ios-text-secondary">
               {filteredVideos.length} video{filteredVideos.length !== 1 ? 's' : ''}
               {selectedThemes.size > 0 && ' filtered'}
+              {' '}{timelineOpen ? '▾' : '▸'}
             </span>
-          </div>
-          <Card className="p-0 overflow-hidden">
-            {filteredVideos.length === 0 ? (
-              <div className="px-4 py-8 text-center text-ios-text-secondary text-[15px]">
-                No videos match the selected themes.
-              </div>
-            ) : (
-              filteredVideos.map((video, index) => (
-                <TimelineRow key={video.video_id} video={video} index={index} />
-              ))
-            )}
-          </Card>
+          </button>
+          {timelineOpen && (
+            <Card className="p-0 overflow-hidden">
+              {filteredVideos.length === 0 ? (
+                <div className="px-4 py-8 text-center text-ios-text-secondary text-[15px]">
+                  No videos match the selected themes.
+                </div>
+              ) : (
+                filteredVideos.map((video, index) => (
+                  <TimelineRow key={video.video_id} video={video} index={index} />
+                ))
+              )}
+            </Card>
+          )}
         </div>
 
         {/* People & Things Card */}

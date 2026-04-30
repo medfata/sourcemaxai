@@ -164,7 +164,7 @@ function ThemesBarChart({
   )
 }
 
-function ToneDonutChart({ tones }: { tones: [string, number][]; maxCount: number }) {
+function ToneDonutChart({ tones }: { tones: [string, number][] }) {
   const data = tones.map(([name, value]) => ({ name, value }))
   const topTone = tones[0]?.[0] ?? ''
   const total = tones.reduce((sum, [, v]) => sum + v, 0)
@@ -628,7 +628,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
                   ))}
                 </div>
               ) : (
-                <ToneDonutChart tones={toneEntries} maxCount={maxToneCount} />
+                <ToneDonutChart tones={toneEntries} />
               )}
             </Card>
           </div>

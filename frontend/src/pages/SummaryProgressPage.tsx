@@ -65,7 +65,7 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
   const [cost, setCost] = useState<CostEstimate | null>(null)
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([])
   const lastStatusRef = useRef<Record<string, string>>({})
-  const [videoListOpen, setVideoListOpen] = useState(true)
+  const [videoListOpen, setVideoListOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -87,7 +87,7 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
           status: 'queued' as VideoStatus,
         }))
       setBaseVideos(rows)
-      if (rows.length > 30) setVideoListOpen(false)
+      setVideoListOpen(rows.length <= 30)
       if (costRes.ok && costRes.data) {
         setCost(costRes.data)
       }

@@ -644,34 +644,6 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
           </div>
         )}
 
-        {/* Timeline Card */}
-        <div>
-          <button
-            onClick={() => setTimelineOpen(o => !o)}
-            className="w-full flex items-center justify-between mb-3"
-          >
-            <SectionHeader className="mb-0">Timeline</SectionHeader>
-            <span className="text-[13px] text-ios-text-secondary">
-              {filteredVideos.length} video{filteredVideos.length !== 1 ? 's' : ''}
-              {selectedThemes.size > 0 && ' filtered'}
-              {' '}{timelineOpen ? '▾' : '▸'}
-            </span>
-          </button>
-          {timelineOpen && (
-            <Card className="p-0 overflow-hidden">
-              {filteredVideos.length === 0 ? (
-                <div className="px-4 py-8 text-center text-ios-text-secondary text-[15px]">
-                  No videos match the selected themes.
-                </div>
-              ) : (
-                filteredVideos.map((video, index) => (
-                  <TimelineRow key={video.video_id} video={video} index={index} />
-                ))
-              )}
-            </Card>
-          )}
-        </div>
-
         {/* People & Things Card */}
         {profile.rollups.all_referenced.length > 0 && (
           <div>
@@ -703,6 +675,34 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
             </Card>
           </div>
         )}
+
+        {/* Timeline Card */}
+        <div>
+          <button
+            onClick={() => setTimelineOpen(o => !o)}
+            className="w-full flex items-center justify-between mb-3"
+          >
+            <SectionHeader className="mb-0">Timeline</SectionHeader>
+            <span className="text-[13px] text-ios-text-secondary">
+              {filteredVideos.length} video{filteredVideos.length !== 1 ? 's' : ''}
+              {selectedThemes.size > 0 && ' filtered'}
+              {' '}{timelineOpen ? '▾' : '▸'}
+            </span>
+          </button>
+          {timelineOpen && (
+            <Card className="p-0 overflow-hidden">
+              {filteredVideos.length === 0 ? (
+                <div className="px-4 py-8 text-center text-ios-text-secondary text-[15px]">
+                  No videos match the selected themes.
+                </div>
+              ) : (
+                filteredVideos.map((video, index) => (
+                  <TimelineRow key={video.video_id} video={video} index={index} />
+                ))
+              )}
+            </Card>
+          )}
+        </div>
 
         {/* Footer */}
         <div className="text-center pt-4">

@@ -188,14 +188,14 @@ function ToneDonutChart({ tones }: { tones: [string, number][] }) {
             </Pie>
           </PieChart>
         </ResponsiveContainer>
-      </div>
-      <div className="text-center mt-2 mb-1">
-        <span className="text-[15px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">{topTone}</span>
-        {total > 0 && (
-          <span className="text-[13px] text-ios-text-secondary ml-2">
-            {tones[0][1]}/{total}
-          </span>
-        )}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-[15px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">{topTone}</span>
+          {total > 0 && (
+            <span className="text-[12px] text-ios-text-secondary">
+              {tones[0][1]}/{total}
+            </span>
+          )}
+        </div>
       </div>
       <div className="w-full space-y-1 mt-1">
         {tones.map(([tone, count], i) => (

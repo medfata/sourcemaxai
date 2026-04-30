@@ -8,19 +8,35 @@ const isYouTubeCitationHref = (href: unknown): href is string =>
   /(?:youtu\.be|youtube\.com)/.test(href) &&
   /[?&]t=/.test(href)
 
+function parseCitationHref(href: string): { videoId: string; startSeconds: number } | null {
+  // Match youtu.be/VIDEO_ID?t=SECONDS or youtube.com/watch?v=VIDEO_ID&t=SECONDS
+  const m = href.match(/(?:youtu\.be\/|v=)([\w-]{11}).*[?&]t=(\d+)s?/)
+  if (!m) return null
+  return { videoId: m[1], startSeconds: Number(m[2]) }
+}
+
 const markdownComponents: Components = {
   a: ({ node: _node, href, children, ...props }) => {
     if (isYouTubeCitationHref(href)) {
+      const citationData = parseCitationHref(href)
+      // Render as button for normal clicks, but preserve middle-click/Cmd-click for new tab
       return (
-        <a
-          {...props}
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={(e) => {
+            // Prevent default for left clicks to handle in-app
+            if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+              e.preventDefault()
+              // TODO: Connect to citation context/provider
+              // For now, just log the citation data
+              console.log('Citation clicked:', citationData)
+            }
+            // For middle-click, Ctrl-click, Cmd-click: let browser handle normally
+          }}
           className="text-[12px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/20 rounded-md px-1.5 py-0.5 mx-0.5 no-underline transition-colors box-decoration-clone break-words"
         >
           {children}
-        </a>
+        </button>
       )
     }
     return (

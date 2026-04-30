@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { ChannelMeta, Profile, ProfileVideo, ThemeCount } from '../types'
 import { formatMonthYear, formatShortDate, formatTimestamp } from '../utils/date'
+
+const CHART_COLORS = ['#0a84ff', '#34c759', '#ff9f0a', '#ff453a', '#bf5af2', '#5ac8fa', '#ffd60a', '#8e8e93']
 
 interface ProfilePageProps {
   channel: ChannelMeta
@@ -102,6 +105,110 @@ function ToneBar({ label, count, maxCount }: { label: string; count: number; max
       <span className="text-[13px] text-ios-text-secondary w-8 text-right flex-shrink-0">
         {count}
       </span>
+    </div>
+  )
+}
+
+function ThemesBarChart({
+  themes,
+  selectedThemes,
+  onThemeClick,
+}: {
+  themes: ThemeCount[]
+  selectedThemes: Set<string>
+  onThemeClick: (theme: string) => void
+}) {
+  const data = themes.map((t) => ({ name: t.theme, count: t.count }))
+  return (
+    <div className="min-h-[200px]">
+      <ResponsiveContainer width="100%" height={themes.length * 32 + 20}>
+        <BarChart data={data as any[]} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+          <XAxis type="number" hide />
+          <YAxis type="category" dataKey="name" width={0} hide />
+          <Bar
+            dataKey="count"
+            radius={[4, 4, 4, 4]}
+            cursor="pointer"
+            onClick={(data: any) => {
+              const theme = data?.name
+              if (theme) onThemeClick(theme)
+            }}
+          >
+            {data.map((entry) => (
+              <Cell
+                key={entry.name}
+                fill={selectedThemes.has(entry.name) ? CHART_COLORS[0] : '#8e8e93'}
+                opacity={selectedThemes.size === 0 || selectedThemes.has(entry.name) ? 1 : 0.4}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="space-y-1 mt-1">
+        {themes.map((t) => (
+          <button
+            key={t.theme}
+            onClick={() => onThemeClick(t.theme)}
+            className={`w-full flex items-center justify-between text-[13px] px-1 py-0.5 rounded hover:bg-ios-bg dark:hover:bg-gray-800 transition-colors text-left ${
+              selectedThemes.has(t.theme)
+                ? 'text-ios-blue font-semibold'
+                : 'text-ios-text-primary dark:text-ios-text-primary-dark'
+            }`}
+          >
+            <span className="truncate">{t.theme}</span>
+            <span className="text-ios-text-secondary ml-2 flex-shrink-0">{t.count}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ToneDonutChart({ tones }: { tones: [string, number][]; maxCount: number }) {
+  const data = tones.map(([name, value]) => ({ name, value }))
+  const topTone = tones[0]?.[0] ?? ''
+  const total = tones.reduce((sum, [, v]) => sum + v, 0)
+  return (
+    <div className="min-h-[200px] flex flex-col items-center justify-center">
+      <div className="relative w-full" style={{ height: Math.max(180, Math.min(260, tones.length * 40)) }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data as any[]}
+              cx="50%"
+              cy="50%"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={2}
+              dataKey="value"
+            >
+              {data.map((_entry, index) => (
+                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="text-center mt-2 mb-1">
+        <span className="text-[15px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">{topTone}</span>
+        {total > 0 && (
+          <span className="text-[13px] text-ios-text-secondary ml-2">
+            {tones[0][1]}/{total}
+          </span>
+        )}
+      </div>
+      <div className="w-full space-y-1 mt-1">
+        {tones.map(([tone, count], i) => (
+          <div key={tone} className="flex items-center gap-2 text-[13px]">
+            <span
+              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+              style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+            />
+            <span className="truncate text-ios-text-primary dark:text-ios-text-primary-dark">{tone}</span>
+            <span className="text-ios-text-secondary ml-auto">{count}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -276,6 +383,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
   const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set())
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [showAllReferenced, setShowAllReferenced] = useState(false)
+  const [showAllThemes, setShowAllThemes] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -414,44 +522,71 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
           </div>
         </Card>
 
-        {/* Themes Card */}
-        <div>
-          <SectionHeader>Recurring themes</SectionHeader>
-          <Card>
-            <div className="flex flex-wrap gap-2">
-              {profile.rollups.all_themes.map((t: ThemeCount) => (
-                <ThemePill
-                  key={t.theme}
-                  label={t.theme}
-                  count={t.count}
-                  counts={themeCounts}
-                  selected={selectedThemes.has(t.theme)}
-                  onClick={() => toggleTheme(t.theme)}
-                />
-              ))}
-            </div>
-            {selectedThemes.size > 0 && (
-              <button
-                onClick={() => setSelectedThemes(new Set())}
-                className="mt-3 text-[13px] text-ios-blue font-medium hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </Card>
-        </div>
-
-        {/* Tone Card */}
-        {toneEntries.length > 0 && (
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <SectionHeader>Tone distribution</SectionHeader>
-            <Card className="space-y-3">
-              {toneEntries.map(([tone, count]) => (
-                <ToneBar key={tone} label={tone} count={count} maxCount={maxToneCount} />
-              ))}
+            <SectionHeader>Top themes</SectionHeader>
+            <Card>
+              <ThemesBarChart
+                themes={profile.rollups.all_themes.slice(0, 8)}
+                selectedThemes={selectedThemes}
+                onThemeClick={toggleTheme}
+              />
+              {profile.rollups.all_themes.length > 8 && !showAllThemes && (
+                <button
+                  onClick={() => setShowAllThemes(true)}
+                  className="mt-2 text-[13px] text-ios-blue font-medium hover:underline"
+                >
+                  Show all ({profile.rollups.all_themes.length})
+                </button>
+              )}
+              {showAllThemes && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {profile.rollups.all_themes.map((t: ThemeCount) => (
+                      <ThemePill
+                        key={t.theme}
+                        label={t.theme}
+                        count={t.count}
+                        counts={themeCounts}
+                        selected={selectedThemes.has(t.theme)}
+                        onClick={() => toggleTheme(t.theme)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setShowAllThemes(false)}
+                    className="mt-2 text-[13px] text-ios-blue font-medium hover:underline"
+                  >
+                    Show less
+                  </button>
+                </div>
+              )}
+              {selectedThemes.size > 0 && (
+                <button
+                  onClick={() => setSelectedThemes(new Set())}
+                  className="mt-2 text-[13px] text-ios-blue font-medium hover:underline block"
+                >
+                  Clear filters
+                </button>
+              )}
             </Card>
           </div>
-        )}
+          <div>
+            <SectionHeader>Tone mix</SectionHeader>
+            <Card>
+              {toneEntries.length < 3 ? (
+                <div className="space-y-3">
+                  {toneEntries.map(([tone, count]) => (
+                    <ToneBar key={tone} label={tone} count={count} maxCount={maxToneCount} />
+                  ))}
+                </div>
+              ) : (
+                <ToneDonutChart tones={toneEntries} maxCount={maxToneCount} />
+              )}
+            </Card>
+          </div>
+        </div>
 
         {/* Timeline Card */}
         <div>

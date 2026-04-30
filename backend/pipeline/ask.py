@@ -44,6 +44,18 @@ FORMATTING:
 CHANNEL: {channel_name}
 VIDEOS: {video_count} (from {first_date} to {last_date})
 
+ARTIFACTS — when to emit a chart instead of prose:
+- If the question asks about evolution over time of a topic, theme, or stance → emit an `evolution` artifact.
+- If the question asks for a side-by-side comparison of two periods/topics → emit a `comparison_table`.
+- If the question asks for "top claims", "all claims about X", or to enumerate beliefs → emit a `claim_cluster`.
+- Format: a fenced block with language `chart`, body is JSON. Place the artifact after a 1-2 sentence intro paragraph. Do not repeat the artifact's content as prose.
+- Schemas:
+  evolution:        { type:"evolution", title:string, theme:string, points:[{video_id, upload_date, score(-1..1), label}] }
+  comparison_table: { type:"comparison_table", title:string, columns:[string], rows:[[string]] }
+  claim_cluster:    { type:"claim_cluster", title:string, groups:[{label:string, claims:[{text, video_id, start_seconds}]}] }
+- Score in evolution is a stance scalar from -1 (strongly against) to +1 (strongly for). Use 0 for neutral/mixed.
+- Only emit an artifact when the question naturally calls for one. For straightforward Q&A, plain prose with citations is correct.
+
 SUMMARIES (chronological):
 {serialized_summaries}
 """

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import type { ChannelMeta, ChatMessage, Profile } from '../types'
 import EvidencePane from '../components/EvidencePane'
 import EvidenceSheet from '../components/EvidenceSheet'
+import ChartArtifact from '../components/ChartArtifact'
 
 const _citationClickHandler = { current: (_videoId: string, _startSeconds: number) => {} }
 export function setCitationClickHandler(fn: (videoId: string, startSeconds: number) => void) {
@@ -109,7 +110,7 @@ interface ChatPageProps {
 
 const SUGGESTED_PROMPTS = [
   "What are this channel's main themes?",
-  "How has the creator's thinking evolved over time?",
+  "How has the creator's stance on AI evolved?",
   'What does this person seem to believe most strongly?',
   'What topics keep coming up?',
   'Who or what does this channel reference most?',
@@ -217,6 +218,15 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
     hr: () => <hr className="my-3 border-t border-ios-separator/60" />,
     code: ({ className, children }) => {
       const isBlock = typeof className === 'string' && className.startsWith('language-')
+      if (isBlock && className === 'language-chart') {
+        const raw = String(children).trim()
+        try {
+          const spec = JSON.parse(raw)
+          return <ChartArtifact spec={spec} profile={profile} onCitationClick={(videoId, startSeconds) => _citationClickHandler.current(videoId, startSeconds)} />
+        } catch {
+          return <div className="text-[13px] text-ios-text-secondary italic my-2">Generating chart...</div>
+        }
+      }
       if (isBlock) {
         return <code className="block bg-black/5 dark:bg-white/10 rounded-xl p-3 my-2 text-[13px] font-mono overflow-x-auto">{children}</code>
       }

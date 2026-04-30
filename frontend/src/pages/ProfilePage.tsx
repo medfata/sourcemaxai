@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis, AreaChart, Area, Tooltip } from 'recharts'
+import { Bar, BarChart, Cell, LabelList, Pie, PieChart, ResponsiveContainer, XAxis, YAxis, AreaChart, Area, Tooltip } from 'recharts'
 import { api } from '../api'
 import type { ChannelMeta, Profile, ProfileVideo, ThemeCount } from '../types'
 import { formatMonthYear, formatShortDate, formatTimestamp } from '../utils/date'
@@ -121,10 +121,18 @@ function ThemesBarChart({
   const data = themes.map((t) => ({ name: t.theme, count: t.count }))
   return (
     <div className="min-h-[200px]">
-      <ResponsiveContainer width="100%" height={themes.length * 32 + 20}>
-        <BarChart data={data as any[]} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+      <ResponsiveContainer width="100%" height={themes.length * 38 + 20}>
+        <BarChart data={data as any[]} layout="vertical" margin={{ left: 0, right: 48, top: 4, bottom: 4 }}>
           <XAxis type="number" hide />
-          <YAxis type="category" dataKey="name" width={0} hide />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={130}
+            hide={false}
+            tick={{ fontSize: 12, fill: 'currentColor' }}
+            tickLine={false}
+            axisLine={false}
+          />
           <Bar
             dataKey="count"
             radius={[4, 4, 4, 4]}
@@ -141,25 +149,10 @@ function ThemesBarChart({
                 opacity={selectedThemes.size === 0 || selectedThemes.has(entry.name) ? 1 : 0.4}
               />
             ))}
+            <LabelList dataKey="count" position="right" fill="currentColor" fontSize={12} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <div className="space-y-1 mt-1">
-        {themes.map((t) => (
-          <button
-            key={t.theme}
-            onClick={() => onThemeClick(t.theme)}
-            className={`w-full flex items-center justify-between text-[13px] px-1 py-0.5 rounded hover:bg-ios-bg dark:hover:bg-gray-800 transition-colors text-left ${
-              selectedThemes.has(t.theme)
-                ? 'text-ios-blue font-semibold'
-                : 'text-ios-text-primary dark:text-ios-text-primary-dark'
-            }`}
-          >
-            <span className="truncate">{t.theme}</span>
-            <span className="text-ios-text-secondary ml-2 flex-shrink-0">{t.count}</span>
-          </button>
-        ))}
-      </div>
     </div>
   )
 }

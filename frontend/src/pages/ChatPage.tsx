@@ -5,6 +5,7 @@ import type { ChannelMeta, ChatMessage, Profile } from '../types'
 import EvidencePane from '../components/EvidencePane'
 import EvidenceSheet from '../components/EvidenceSheet'
 import ChartArtifact from '../components/ChartArtifact'
+import ScopeChips from '../components/ScopeChips'
 
 const _citationClickHandler = { current: (_videoId: string, _startSeconds: number) => {} }
 export function setCitationClickHandler(fn: (videoId: string, startSeconds: number) => void) {
@@ -133,6 +134,10 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [focusedRef, setFocusedRef] = useState<any>(null)
   const [conversationRefs, setConversationRefs] = useState<any[]>([])
+  const [scope, setScope] = useState<{ themes: string[]; tones: string[]; dateFrom?: string; dateTo?: string }>({
+    themes: [],
+    tones: [],
+  })
   const completedRef = useRef(false)
   const seedAppliedRef = useRef(false)
   const autoFocusRef = useRef(true)
@@ -255,6 +260,7 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
         body: JSON.stringify({
           channel_id: channel.channel_id,
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
+          scope: scope.themes.length || scope.tones.length || scope.dateFrom ? scope : undefined,
         }),
       })
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
@@ -272,7 +278,12 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
             scrollToBottom()
           } else if (frame.type === 'error') {
             streamError = true
-            setError(frame.message || 'Unknown error')
+            const errMsg = frame.message || 'Unknown error'
+            if (errMsg === 'scope_empty') {
+              setError('No videos match the current filter.')
+            } else {
+              setError(errMsg)
+            }
             break
           } else if (frame.type === 'done') {
             break
@@ -320,6 +331,7 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
       body: JSON.stringify({
         channel_id: channel.channel_id,
         messages: trimmed.map((m) => ({ role: m.role, content: m.content })),
+        scope: scope.themes.length || scope.tones.length || scope.dateFrom ? scope : undefined,
       }),
     })
       .then(async (res) => {
@@ -405,6 +417,8 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
       </div>
 
       <EvidenceSheet focusedRef={focusedRef} conversationRefs={conversationRefs} onSelectRef={setFocusedRef} channelName={channel.channel_name} isOpen={sheetOpen} onClose={() => setSheetOpen(false)} />
+
+      <ScopeChips profile={profile} scope={scope} onScopeChange={setScope} />
 
       {messages.length === 0 && (
         <div className="px-4 pb-3">

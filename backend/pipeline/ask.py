@@ -5,7 +5,7 @@ import os
 
 from anthropic import AsyncAnthropic
 
-from backend.models import ApiResponse
+from backend.models import ApiResponse, ChatScope
 from backend.storage import get_channel_dir, read_json
 
 CHAT_SYSTEM_PROMPT_TEMPLATE = """You are analyzing a YouTube channel based on structured summaries of its videos.
@@ -61,7 +61,25 @@ SUMMARIES (chronological):
 """
 
 
-def build_system_prompt(channel_id: str) -> str | None:
+def filter_videos(videos: list[dict], scope: ChatScope | None) -> list[dict]:
+    """Filter videos by scope (themes, tones, date range)."""
+    if scope is None:
+        return videos
+    out = videos
+    if scope.themes:
+        wanted = {t.lower() for t in scope.themes}
+        out = [v for v in out if any(t.lower() in wanted for t in v.get("recurring_themes", []))]
+    if scope.tones:
+        wanted = {t.lower() for t in scope.tones}
+        out = [v for v in out if any(t.lower() in wanted for t in v.get("tone_markers", []))]
+    if scope.date_from:
+        out = [v for v in out if v.get("upload_date", "") >= scope.date_from]
+    if scope.date_to:
+        out = [v for v in out if v.get("upload_date", "") <= scope.date_to]
+    return out
+
+
+def build_system_prompt(channel_id: str, scope: ChatScope | None = None) -> str | None:
     """Load profile.json and build the system prompt. Returns None if profile missing."""
     channel_dir = get_channel_dir(channel_id)
     profile = read_json(channel_dir / "profile.json")
@@ -69,12 +87,26 @@ def build_system_prompt(channel_id: str) -> str | None:
         return None
 
     channel_name = profile.get("channel_name", "Unknown")
-    video_count = profile.get("video_count", 0)
     date_range = profile.get("date_range", {})
     first_date = date_range.get("first", "unknown")
     last_date = date_range.get("last", "unknown")
     videos = profile.get("videos", [])
-    serialized_summaries = json.dumps(videos, separators=(",", ":"))
+    filtered_videos = filter_videos(videos, scope)
+    video_count = len(filtered_videos)
+    serialized_summaries = json.dumps(filtered_videos, separators=(",", ":"))
+
+    scope_line = ""
+    if scope and (scope.themes or scope.tones or scope.date_from or scope.date_to):
+        parts = []
+        if scope.themes:
+            parts.append(f"themes={', '.join(scope.themes)}")
+        if scope.tones:
+            parts.append(f"tones={', '.join(scope.tones)}")
+        if scope.date_from or scope.date_to:
+            from_part = scope.date_from or "beginning"
+            to_part = scope.date_to or "end"
+            parts.append(f"dates={from_part}..{to_part}")
+        scope_line = f"\n\nSCOPE: restricted to {video_count} of {len(videos)} videos matching: {', '.join(parts)}. Do not reference videos outside this set."
 
     return CHAT_SYSTEM_PROMPT_TEMPLATE.format(
         channel_name=channel_name,
@@ -82,12 +114,26 @@ def build_system_prompt(channel_id: str) -> str | None:
         first_date=first_date,
         last_date=last_date,
         serialized_summaries=serialized_summaries,
-    )
+    ) + scope_line
 
 
-async def chat_stream(channel_id: str, messages: list[dict]):
+async def chat_stream(channel_id: str, messages: list[dict], scope: ChatScope | None = None):
     """Yield SSE data frames for the chat stream."""
-    system = build_system_prompt(channel_id)
+    if scope and not scope.themes and not scope.tones and not scope.date_from and not scope.date_to:
+        scope = None
+
+    channel_dir = get_channel_dir(channel_id)
+    profile = read_json(channel_dir / "profile.json")
+    if not profile:
+        yield json.dumps({"type": "error", "message": "profile_not_found"})
+        return
+
+    filtered_videos = filter_videos(profile.get("videos", []), scope)
+    if scope and len(filtered_videos) == 0:
+        yield json.dumps({"type": "error", "message": "scope_empty"})
+        return
+
+    system = build_system_prompt(channel_id, scope)
     if system is None:
         yield json.dumps({"type": "error", "message": "profile_not_found"})
         return

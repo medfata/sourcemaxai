@@ -75,11 +75,21 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatScope(BaseModel):
+    """Filter scope for chat."""
+
+    themes: list[str] = Field(default_factory=list)
+    tones: list[str] = Field(default_factory=list)
+    date_from: str | None = None
+    date_to: str | None = None
+
+
 class ChatPayload(BaseModel):
     """Payload for POST /api/chat."""
 
     channel_id: str
     messages: list[ChatMessage]
+    scope: ChatScope | None = None
 
 
 class SelectionPayload(BaseModel):

@@ -275,6 +275,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
   const [error, setError] = useState<string | null>(null)
   const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set())
   const [timelineOpen, setTimelineOpen] = useState(false)
+  const [showAllReferenced, setShowAllReferenced] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -486,7 +487,10 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
             <SectionHeader>Frequently referenced</SectionHeader>
             <Card>
               <div className="flex flex-wrap gap-2">
-                {profile.rollups.all_referenced.map((r) => (
+                {(showAllReferenced
+                  ? profile.rollups.all_referenced
+                  : profile.rollups.all_referenced.slice(0, 10)
+                ).map((r) => (
                   <ReferencedPill
                     key={r.name}
                     label={r.name}
@@ -495,6 +499,16 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
                   />
                 ))}
               </div>
+              {profile.rollups.all_referenced.length > 10 && (
+                <button
+                  onClick={() => setShowAllReferenced(v => !v)}
+                  className="mt-3 text-[13px] text-ios-blue font-medium hover:underline"
+                >
+                  {showAllReferenced
+                    ? 'Show less'
+                    : `Show all (${profile.rollups.all_referenced.length})`}
+                </button>
+              )}
             </Card>
           </div>
         )}

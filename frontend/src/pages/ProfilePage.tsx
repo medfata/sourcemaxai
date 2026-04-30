@@ -40,6 +40,10 @@ function sizeBucket(counts: number[], value: number): 'sm' | 'md' | 'lg' {
   return 'md'
 }
 
+function isClaim(x: unknown): x is { text: string; evidence: { start_seconds: number; quote: string }[] } {
+  return typeof x === 'object' && x !== null && 'text' in x && 'evidence' in x && Array.isArray((x as any).evidence)
+}
+
 function ThemePill({
   label,
   count,
@@ -335,14 +339,18 @@ function TimelineRow({
                 Key claims
               </p>
               <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-1">
-                {video.key_claims.map((claim, i) => (
-                  <ClaimItem
-                    key={i}
-                    text={claim.text}
-                    evidence={claim.evidence}
-                    videoId={video.video_id}
-                  />
-                ))}
+                {video.key_claims.map((claim, i) =>
+                  isClaim(claim) ? (
+                    <ClaimItem
+                      key={i}
+                      text={claim.text}
+                      evidence={claim.evidence}
+                      videoId={video.video_id}
+                    />
+                  ) : (
+                    <li key={i}>{String(claim)}</li>
+                  )
+                )}
               </ul>
             </div>
           )}
@@ -369,14 +377,18 @@ function TimelineRow({
                 Notable opinions
               </p>
               <ul className="list-disc list-inside text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark space-y-1">
-                {video.notable_opinions.map((op, i) => (
-                  <ClaimItem
-                    key={i}
-                    text={op.text}
-                    evidence={op.evidence}
-                    videoId={video.video_id}
-                  />
-                ))}
+                {video.notable_opinions.map((op, i) =>
+                  isClaim(op) ? (
+                    <ClaimItem
+                      key={i}
+                      text={op.text}
+                      evidence={op.evidence}
+                      videoId={video.video_id}
+                    />
+                  ) : (
+                    <li key={i}>{String(op)}</li>
+                  )
+                )}
               </ul>
             </div>
           )}
@@ -510,7 +522,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
     const all: AggregatedClaim[] = []
     for (const v of profile.videos) {
       for (const op of v.notable_opinions) {
-        if (op.evidence.length === 0) continue
+        if (!isClaim(op) || op.evidence.length === 0) continue
         all.push({
           text: op.text,
           videoId: v.video_id,
@@ -523,7 +535,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
     if (all.length < 5) {
       for (const v of profile.videos) {
         for (const c of v.key_claims) {
-          if (c.evidence.length === 0) continue
+          if (!isClaim(c) || c.evidence.length === 0) continue
           all.push({
             text: c.text,
             videoId: v.video_id,

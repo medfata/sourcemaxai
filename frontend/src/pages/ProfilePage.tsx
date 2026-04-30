@@ -9,7 +9,7 @@ const CHART_COLORS = ['#0a84ff', '#34c759', '#ff9f0a', '#ff453a', '#bf5af2', '#5
 interface ProfilePageProps {
   channel: ChannelMeta
   onBack: () => void
-  onStartChat: () => void
+  onStartChat: (seed?: string) => void
 }
 
 function SectionHeader({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -555,6 +555,19 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
     return deduped
   }, [profile])
 
+  const suggestedQuestions = useMemo<string[]>(() => {
+    if (!profile) return []
+    const themes = profile.rollups.all_themes
+    const refs = profile.rollups.all_referenced
+    const name = profile.channel_name
+    const out: string[] = []
+    if (themes[0]) out.push(`How does ${name} think about ${themes[0].theme}?`)
+    if (themes[1]) out.push(`Has ${name}'s view on ${themes[1].theme} changed over time?`)
+    if (refs[0]) out.push(`What does ${name} say about ${refs[0].name}?`)
+    out.push(`Summarize the most distinctive opinions ${name} has shared.`)
+    return out.slice(0, 4)
+  }, [profile])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
@@ -720,6 +733,24 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
           </div>
         )}
 
+        {/* Suggested questions */}
+        <div>
+          <SectionHeader>Suggested questions</SectionHeader>
+          <Card>
+            <div className="flex flex-col gap-2">
+              {suggestedQuestions.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => onStartChat(q)}
+                  className="text-left text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark px-4 py-3 rounded-xl bg-ios-bg dark:bg-gray-800 hover:bg-ios-blue/10 hover:text-ios-blue transition-colors"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </Card>
+        </div>
+
         {/* Timeline Card */}
         <div>
           <button
@@ -786,7 +817,7 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
         {/* Footer */}
         <div className="text-center pt-4">
           <button
-            onClick={onStartChat}
+            onClick={() => onStartChat()}
             className="w-full sm:w-auto inline-flex items-center justify-center px-8 py-4 bg-ios-blue text-white rounded-2xl text-[17px] font-semibold active:scale-95 transition-transform"
           >
             Start chatting →

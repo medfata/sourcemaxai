@@ -504,6 +504,57 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
       .map(([month, count]) => ({ month, count }))
   }, [profile])
 
+  interface AggregatedClaim {
+    text: string
+    videoId: string
+    videoTitle: string
+    uploadDate: string
+    startSeconds: number
+  }
+
+  const signatureClaims = useMemo<AggregatedClaim[]>(() => {
+    if (!profile) return []
+    const all: AggregatedClaim[] = []
+    for (const v of profile.videos) {
+      for (const op of v.notable_opinions) {
+        if (op.evidence.length === 0) continue
+        all.push({
+          text: op.text,
+          videoId: v.video_id,
+          videoTitle: v.title,
+          uploadDate: v.upload_date,
+          startSeconds: op.evidence[0].start_seconds,
+        })
+      }
+    }
+    if (all.length < 5) {
+      for (const v of profile.videos) {
+        for (const c of v.key_claims) {
+          if (c.evidence.length === 0) continue
+          all.push({
+            text: c.text,
+            videoId: v.video_id,
+            videoTitle: v.title,
+            uploadDate: v.upload_date,
+            startSeconds: c.evidence[0].start_seconds,
+          })
+          if (all.length >= 5) break
+        }
+        if (all.length >= 5) break
+      }
+    }
+    const seen = new Set<string>()
+    const deduped: AggregatedClaim[] = []
+    for (const c of all) {
+      const key = c.text.slice(0, 60).toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      deduped.push(c)
+      if (deduped.length >= 5) break
+    }
+    return deduped
+  }, [profile])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
@@ -648,6 +699,26 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
             </Card>
           </div>
         </div>
+
+        {/* Signature claims */}
+        {signatureClaims.length > 0 && (
+          <div>
+            <SectionHeader>Signature claims</SectionHeader>
+            <Card>
+              <ul className="space-y-3">
+                {signatureClaims.map((c, i) => (
+                  <li key={i} className="text-[15px] text-ios-text-primary dark:text-ios-text-primary-dark leading-relaxed">
+                    <span>{c.text}</span>
+                    <CitationPill videoId={c.videoId} startSeconds={c.startSeconds} />
+                    <div className="text-[12px] text-ios-text-secondary mt-0.5 truncate">
+                      {c.videoTitle} · {formatShortDate(c.uploadDate)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        )}
 
         {/* Timeline Card */}
         <div>

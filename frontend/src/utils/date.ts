@@ -23,3 +23,13 @@ export function formatShortDate(yyyymmdd: string): string {
   const date = new Date(y, m, d)
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date)
 }
+
+export function formatTimestamp(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds || 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`
+  return `${m}:${pad(sec)}`
+}

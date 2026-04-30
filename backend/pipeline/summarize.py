@@ -88,11 +88,11 @@ class VideoSummary(BaseModel):
     """Structured summary of a single video."""
 
     core_topic: str
-    key_claims: list[Claim]
-    recurring_themes: list[str]
-    tone_markers: list[str]
-    notable_opinions: list[Claim]
-    people_or_things_referenced: list[str]
+    key_claims: list[Claim] = []
+    recurring_themes: list[str] = []
+    tone_markers: list[str] = []
+    notable_opinions: list[Claim] = []
+    people_or_things_referenced: list[str] = []
 
 
 def _extract_json(text: str) -> str:
@@ -195,7 +195,7 @@ async def _summarize_one(
 
         response = await client.messages.create(
             model="MiniMax-M2.7",
-            max_tokens=2000,
+            max_tokens=4000,
             system=system,
             messages=[{"role": "user", "content": user_message}],
         )

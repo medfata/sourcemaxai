@@ -1,0 +1,65 @@
+● Use cases & users
+
+  Researchers / journalists profiling a creator before writing about them — "what does this person actually believe, and has it shifted?" Today they'd skim 50 videos manually.
+
+  Investors / recruiters doing due diligence on a founder, expert, or hire who has a public video presence. The chat answers "is this person consistent?" without watching hours of footage.
+
+  Competitive analysis for content creators — point it at a rival channel to see themes, cadence, recurring references. Useful for podcasters, YouTubers, newsletter writers.
+
+  Students / fans of a thinker (think Naval, Huberman, Lex) who want to query a body of work like a personal corpus. This is probably the most viral use case — "ask Naval anything" without RAG infra.
+
+  PR / comms teams vetting someone before a partnership or appearance. "Has this person ever said anything about X?"
+
+  Personal knowledge — anyone who's binge-watched a channel and wants to revisit ideas without scrubbing timestamps.
+
+  Features beyond chat
+
+  The chat is the headline, but on its own it's a demo. What turns this into something people open twice:
+
+  1. Citations with timestamps. When the model says "the creator argued X in their 2023 video," link directly to the YouTube video at the right second. Without this, answers feel ungrounded — with it, the app becomes a research tool.
+  Highest ROI feature you can add.
+  2. Comparison mode. Two channels side-by-side, same questions answered against both. "How do Lex and Tim Ferriss differ on productivity?" This is the unique-to-this-app feature competitors can't easily ship.
+  3. Evolution view. A timeline visualization of how a specific topic/opinion changed across videos. You already aggregate chronologically — surface the change explicitly. Pick a theme → see the slope.
+  4. Saved questions / digests. Let users save a question and re-run it monthly as the creator posts new videos. Pairs with /schedule-style background runs. Turns a one-shot tool into a subscription.
+  5. Export. Markdown/PDF of the profile + selected Q&A. Journalists and analysts need to paste this into their own docs.
+  6. Quote extraction. "Pull the 10 strongest claims this person has ever made." Distinct from chat — it's a structured browse, not a conversation.
+  7. Topic clustering / search inside the profile. Free-text search across summaries with filtering by theme/tone. Many users want to browse, not ask.
+
+  The biggest gap in v1 is groundedness — chat without source links is hard to trust. Fix that first, then comparison mode is the differentiator.
+
+-------------------------
+
+❯ whats the best ai model for this app use cases ? dont be bias towards anthropic model's lol
+
+● Honest take
+
+  Two jobs, different optimal models:
+
+  Summarization (batch, structured JSON, cheap)
+
+  Winner: Gemini 2.5 Flash. Cheapest among frontier-quality models, very fast, native JSON mode, 1M context so no transcript chunking ever. For this exact workload — "transcript in, structured JSON out" — it beats Claude Haiku 4.5 on
+  price and beats GPT-5 mini on context. MiniMax-M2.7 (your current choice) is competitive on price but less battle-tested for strict JSON adherence, and your own brief flags a real wart: reasoning_content leaking through the
+  Anthropic-compatible endpoint.
+
+  If cost is the only thing that matters: DeepSeek V3 is ~3-5x cheaper still, quality is genuinely close for this kind of extraction task.
+
+  Chat over the aggregated profile (long context, grounding, streaming)
+
+  Winner: Gemini 2.5 Pro. This is the use case Google has specifically invested in — long-context retrieval accuracy. With 200 video summaries (~50k tokens), the question "find the videos where the creator changed their mind about X" is
+   exactly where Gemini Pro pulls ahead in benchmarks. 1M context window means you'll never have to truncate.
+
+  Close second: GPT-5. Slightly better reasoning, slightly worse long-context recall, more expensive. Pick it if you want sharper "synthesize across 200 videos" answers.
+
+  Claude Sonnet 4.6 writes the cleanest, least-hedgy prose of the three, but it's the priciest and not the strongest at long-context needle retrieval.
+
+  What I'd actually ship
+
+  - Summarize: Gemini 2.5 Flash (or DeepSeek V3 if you're cost-obsessed)
+  - Chat: Gemini 2.5 Pro
+
+  Same provider for both = one SDK, one key, simpler. And it sidesteps the MiniMax reasoning-leak issue your brief warns about.
+
+  The real lever, though
+
+  Model choice matters less than giving chat citations with timestamps (the feature I flagged earlier). A weaker model with grounded citations beats a stronger model that hallucinates confidently every time. Fix that before optimizing
+  model choice.

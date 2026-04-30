@@ -37,22 +37,37 @@ def test_fetch_channel_playlists_fallback_video_count():
     assert result[0]["video_count"] == 7
 
 
-def test_fetch_channel_playlists_fallback_n_entries():
-    """Fall back to n_entries when both playlist_count and video_count are absent."""
+def test_fetch_channel_playlists_ignores_n_entries():
+    """n_entries on /playlists tab is the outer tab count (= number of playlists),
+    not the size of each playlist. Must NOT be used as fallback. Instead, fall
+    back to counting actual video IDs."""
     mock = _mock_stdout([
-        {"id": "PL1", "title": "Test", "n_entries": 4},
+        {"id": "PL1", "title": "Test", "n_entries": 3},
     ])
-    with patch("backend.pipeline.fetch_videos._run_ytdlp", return_value=mock):
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", return_value=mock), \
+         patch("backend.pipeline.fetch_videos.fetch_playlist_video_ids", return_value=["v1", "v2", "v3", "v4", "v5"]):
+        result = fetch_channel_playlists("https://www.youtube.com/@test")
+    assert result[0]["video_count"] == 5
+
+
+def test_fetch_channel_playlists_falls_back_to_id_count():
+    """When playlist_count and video_count are absent, count actual video IDs."""
+    mock = _mock_stdout([
+        {"id": "PL1", "title": "Test"},
+    ])
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", return_value=mock), \
+         patch("backend.pipeline.fetch_videos.fetch_playlist_video_ids", return_value=["a", "b", "c", "d"]):
         result = fetch_channel_playlists("https://www.youtube.com/@test")
     assert result[0]["video_count"] == 4
 
 
-def test_fetch_channel_playlists_default_zero():
-    """Default to 0 when no count field is present."""
+def test_fetch_channel_playlists_default_zero_on_fetch_failure():
+    """If both count fields are absent and fallback fetch fails, default to 0."""
     mock = _mock_stdout([
         {"id": "PL1", "title": "Test"},
     ])
-    with patch("backend.pipeline.fetch_videos._run_ytdlp", return_value=mock):
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", return_value=mock), \
+         patch("backend.pipeline.fetch_videos.fetch_playlist_video_ids", side_effect=RuntimeError("boom")):
         result = fetch_channel_playlists("https://www.youtube.com/@test")
     assert result[0]["video_count"] == 0
 

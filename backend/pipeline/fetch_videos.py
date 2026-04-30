@@ -143,7 +143,15 @@ def fetch_channel_playlists(channel_url: str) -> list[dict[str, Any]]:
         plid = info.get("id")
         if not plid:
             continue
-        video_count = info.get("playlist_count") or info.get("video_count") or info.get("n_entries") or 0
+        # Note: do NOT use info.get("n_entries") here. On the /playlists tab
+        # listing, n_entries is the count of the outer tab (= number of
+        # playlists), not the size of each individual playlist.
+        video_count = info.get("playlist_count") or info.get("video_count") or 0
+        if not video_count:
+            try:
+                video_count = len(fetch_playlist_video_ids(plid))
+            except Exception:
+                video_count = 0
         thumbnail = None
         thumbnails = info.get("thumbnails")
         if thumbnails and len(thumbnails) > 0:

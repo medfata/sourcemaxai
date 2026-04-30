@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis, AreaChart, Area, Tooltip } from 'recharts'
 import { api } from '../api'
 import type { ChannelMeta, Profile, ProfileVideo, ThemeCount } from '../types'
 import { formatMonthYear, formatShortDate, formatTimestamp } from '../utils/date'
@@ -209,6 +209,40 @@ function ToneDonutChart({ tones }: { tones: [string, number][]; maxCount: number
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function UploadActivityChart({ data }: { data: { month: string; count: number }[] }) {
+  return (
+    <div className="min-h-[120px]">
+      <ResponsiveContainer width="100%" height={120}>
+        <AreaChart data={data as any[]} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <XAxis
+            dataKey="month"
+            tick={{ fontSize: 11, fill: 'currentColor' }}
+            tickLine={false}
+            axisLine={false}
+            className="text-ios-text-secondary"
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'var(--color-ios-card, #fff)',
+              border: '1px solid var(--color-ios-muted, #e5e7eb)',
+              borderRadius: 8,
+              fontSize: 13,
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="count"
+            stroke={CHART_COLORS[0]}
+            fill={CHART_COLORS[0]}
+            fillOpacity={0.15}
+            strokeWidth={2}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   )
 }
@@ -457,6 +491,18 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
     return Math.max(...toneEntries.map(([, c]) => c))
   }, [toneEntries])
 
+  const monthlyCounts = useMemo(() => {
+    if (!profile) return []
+    const map = new Map<string, number>()
+    for (const v of profile.videos) {
+      const key = v.upload_date.slice(0, 7)
+      map.set(key, (map.get(key) ?? 0) + 1)
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, count]) => ({ month, count }))
+  }, [profile])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
@@ -587,6 +633,16 @@ export default function ProfilePage({ channel, onBack, onStartChat }: ProfilePag
             </Card>
           </div>
         </div>
+
+        {/* Upload Activity */}
+        {monthlyCounts.length >= 2 && (
+          <div>
+            <SectionHeader>Activity over time</SectionHeader>
+            <Card>
+              <UploadActivityChart data={monthlyCounts} />
+            </Card>
+          </div>
+        )}
 
         {/* Timeline Card */}
         <div>

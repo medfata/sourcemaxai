@@ -196,13 +196,22 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
         const citationData = parseCitationHref(href)
         if (citationData) {
           return (
-            <button
-              type="button"
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                // Left click only (button === 0) and no modifier keys → in-app
+                if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+                  e.preventDefault()
+                  _citationClickHandler.current(citationData.videoId, citationData.startSeconds)
+                }
+                // Middle-click, Cmd-click, Ctrl-click → let browser open in new tab (default)
+              }}
               className="text-[12px] font-medium text-ios-blue bg-ios-blue/10 hover:bg-ios-blue/20 rounded-md px-1.5 py-0.5 mx-0.5 no-underline transition-colors box-decoration-clone break-words cursor-pointer"
-              onClick={() => _citationClickHandler.current(citationData.videoId, citationData.startSeconds)}
             >
               {children}
-            </button>
+            </a>
           )
         }
       }
@@ -417,6 +426,15 @@ export default function ChatPage({ channel, onBack, onComplete, initialInput }: 
       </div>
 
       <EvidenceSheet focusedRef={focusedRef} conversationRefs={conversationRefs} onSelectRef={setFocusedRef} channelName={channel.channel_name} isOpen={sheetOpen} onClose={() => setSheetOpen(false)} />
+
+      {conversationRefs.length > 0 && (
+        <button
+          onClick={() => setSheetOpen(true)}
+          className="lg:hidden fixed bottom-20 right-4 z-40 bg-ios-blue text-white text-[12px] font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-ios-blue/90 transition-colors"
+        >
+          View sources ({conversationRefs.length})
+        </button>
+      )}
 
       <ScopeChips profile={profile} scope={scope} onScopeChange={setScope} />
 

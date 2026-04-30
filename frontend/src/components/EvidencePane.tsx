@@ -62,12 +62,19 @@ export default function EvidencePane({
           {focusedRef ? (
             <>
               <div className="aspect-video w-full mb-4">
-                <iframe
-                  title="YouTube video player"
-                  src={`https://www.youtube.com/embed/${focusedRef.videoId}?start=${focusedRef.startSeconds}&autoplay=1&rel=0`}
-                  allowFullScreen
-                  className="w-full h-full rounded-xl"
-                />
+                {focusedRef.profileVideo ? (
+                  <iframe
+                    key={`${focusedRef.videoId}-${focusedRef.startSeconds}`}
+                    title="YouTube video player"
+                    src={`https://www.youtube.com/embed/${focusedRef.videoId}?start=${focusedRef.startSeconds}&autoplay=1&rel=0`}
+                    allowFullScreen
+                    className="w-full h-full rounded-xl"
+                  />
+                ) : (
+                  <div className="w-full h-full rounded-xl bg-black/10 flex items-center justify-center text-ios-text-secondary text-sm">
+                    Video not in profile
+                  </div>
+                )}
               </div>
 
               <div className="mb-4">

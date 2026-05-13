@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { apiStreamFetch } from '../api'
+import { api, apiStreamFetch } from '../api'
 import type { PipelineState } from '../types'
 
 interface UseSSEReturn {
@@ -20,6 +20,17 @@ export function useSSE(channelId: string | null): UseSSEReturn {
     const activeChannelId = channelId
     const abort = new AbortController()
     abortRef.current = abort
+
+    async function loadInitialState() {
+      try {
+        const res = await api.pipelineState(activeChannelId)
+        if (!abort.signal.aborted && res.ok && res.data) {
+          setState(res.data)
+        }
+      } catch {
+        // The stream still has its own initial_state event; this fetch is a fast refresh fallback.
+      }
+    }
 
     function applyEvent(event: string, rawData: string) {
       if (!rawData) return
@@ -97,6 +108,7 @@ export function useSSE(channelId: string | null): UseSSEReturn {
       }
     }
 
+    loadInitialState()
     connect()
 
     return () => {

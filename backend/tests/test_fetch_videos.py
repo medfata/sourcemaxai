@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from backend.pipeline import fetch_videos as fetch_videos_module
-from backend.pipeline.fetch_videos import _run_ytdlp, fetch_channel_videos
+from backend.pipeline.fetch_videos import _run_ytdlp, fetch_channel_videos, resolve_channel
 
 
 def _mock_stdout(videos: list[dict]) -> str:
@@ -114,6 +114,7 @@ def test_run_ytdlp_uses_cookie_file_path(monkeypatch):
         "python",
         "-m",
         "yt_dlp",
+        "--ignore-config",
         "--no-warnings",
         "--no-check-certificates",
         "--cookies",
@@ -147,6 +148,40 @@ def test_run_ytdlp_decodes_base64_cookies_to_temp_file(monkeypatch, tmp_path):
     assert cookie_path.read_text(encoding="utf-8") == (
         "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tvalue\n"
     )
+
+
+def test_resolve_channel_uses_flat_playlist_for_metadata():
+    """Channel metadata resolution must not inspect a video's downloadable formats."""
+    calls: list[list[str]] = []
+
+    def fake_run_ytdlp(args):
+        calls.append(args)
+        if "--print" in args:
+            return "UC123\nCreator Name\nhttps://www.youtube.com/@creator\n"
+        return json.dumps({"thumbnails": [{"url": "https://example.test/avatar.jpg"}]})
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        meta = resolve_channel("https://www.youtube.com/@creator")
+
+    assert meta == {
+        "channel_id": "UC123",
+        "channel_name": "Creator Name",
+        "channel_handle": "creator",
+        "avatar_url": "https://example.test/avatar.jpg",
+    }
+    assert calls[0] == [
+        "--flat-playlist",
+        "--skip-download",
+        "--print",
+        "%(channel_id)s",
+        "--print",
+        "%(channel)s",
+        "--print",
+        "%(channel_url)s",
+        "--playlist-items",
+        "1",
+        "https://www.youtube.com/@creator",
+    ]
 
 
 def test_run_ytdlp_rejects_invalid_base64_cookies(monkeypatch):

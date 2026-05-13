@@ -72,6 +72,7 @@ def _run_ytdlp(args: list[str]) -> str:
         "python",
         "-m",
         "yt_dlp",
+        "--ignore-config",
         "--no-warnings",
         "--no-check-certificates",
         *_ytdlp_cookie_args(),
@@ -91,9 +92,11 @@ def resolve_channel(url: str) -> dict[str, Any]:
     Accepts channel URLs (@handle, /c/, /channel/), playlist URLs, and video URLs.
     Returns {"channel_id", "channel_name", "channel_handle", "avatar_url"}.
     """
-    # Resolve using a single item to extract channel fields
+    # Resolve through the flat channel listing so yt-dlp does not inspect a
+    # video format when all we need is channel metadata.
     stdout = _run_ytdlp(
         [
+            "--flat-playlist",
             "--skip-download",
             "--print",
             "%(channel_id)s",

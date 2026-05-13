@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 _RUNTIME_COOKIE_FILE: Path | None = None
 _RUNTIME_COOKIE_SOURCE: str | None = None
@@ -86,6 +87,75 @@ def _run_ytdlp(args: list[str]) -> str:
     return result.stdout
 
 
+def _clean_ytdlp_value(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text in {"NA", "None", "null"} else text
+
+
+def _is_channel_id(value: str) -> bool:
+    return value.startswith("UC")
+
+
+def _channel_id_from_url(url: Any) -> str:
+    text = _clean_ytdlp_value(url)
+    if not text:
+        return ""
+    path_parts = [part for part in urlparse(text).path.split("/") if part]
+    if len(path_parts) >= 2 and path_parts[0] == "channel" and _is_channel_id(path_parts[1]):
+        return path_parts[1]
+    return ""
+
+
+def _metadata_from_info(info: dict[str, Any]) -> dict[str, str]:
+    channel_url = _clean_ytdlp_value(
+        info.get("channel_url") or info.get("uploader_url") or info.get("webpage_url")
+    )
+    raw_channel_id = _clean_ytdlp_value(info.get("channel_id"))
+    raw_id = _clean_ytdlp_value(info.get("id"))
+    channel_id = (
+        (raw_channel_id if _is_channel_id(raw_channel_id) else "")
+        or _channel_id_from_url(channel_url)
+        or (raw_id if _is_channel_id(raw_id) else "")
+    )
+    channel_name = (
+        _clean_ytdlp_value(info.get("channel"))
+        or _clean_ytdlp_value(info.get("uploader"))
+        or _clean_ytdlp_value(info.get("title"))
+    )
+    return {
+        "channel_id": channel_id,
+        "channel_name": channel_name,
+        "channel_url": channel_url,
+    }
+
+
+def _metadata_from_json(stdout: str) -> dict[str, str]:
+    if not stdout.strip():
+        return {"channel_id": "", "channel_name": "", "channel_url": ""}
+
+    info = json.loads(stdout)
+    metadata = _metadata_from_info(info)
+    if metadata["channel_id"] and metadata["channel_name"]:
+        return metadata
+
+    entries = info.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_metadata = _metadata_from_info(entry)
+            if not metadata["channel_id"] and entry_metadata["channel_id"]:
+                metadata["channel_id"] = entry_metadata["channel_id"]
+            if not metadata["channel_name"] and entry_metadata["channel_name"]:
+                metadata["channel_name"] = entry_metadata["channel_name"]
+            if not metadata["channel_url"] and entry_metadata["channel_url"]:
+                metadata["channel_url"] = entry_metadata["channel_url"]
+            if metadata["channel_id"] and metadata["channel_name"]:
+                return metadata
+
+    return metadata
+
+
 def resolve_channel(url: str) -> dict[str, Any]:
     """Resolve a YouTube URL to channel metadata.
 
@@ -109,13 +179,37 @@ def resolve_channel(url: str) -> dict[str, Any]:
             url,
         ]
     )
-    lines = [line.strip() for line in stdout.strip().splitlines() if line.strip()]
-    if len(lines) < 3:
+    lines = [_clean_ytdlp_value(line) for line in stdout.strip().splitlines()]
+    printed_channel_id = lines[0] if len(lines) >= 1 and _is_channel_id(lines[0]) else ""
+    metadata = {
+        "channel_id": printed_channel_id,
+        "channel_name": lines[1] if len(lines) >= 2 else "",
+        "channel_url": lines[2] if len(lines) >= 3 else "",
+    }
+
+    if not metadata["channel_id"] or not metadata["channel_name"]:
+        info_stdout = _run_ytdlp(
+            [
+                "--flat-playlist",
+                "--dump-single-json",
+                "--playlist-items",
+                "1",
+                url,
+            ]
+        )
+        json_metadata = _metadata_from_json(info_stdout)
+        metadata = {
+            "channel_id": metadata["channel_id"] or json_metadata["channel_id"],
+            "channel_name": metadata["channel_name"] or json_metadata["channel_name"],
+            "channel_url": metadata["channel_url"] or json_metadata["channel_url"],
+        }
+
+    if not metadata["channel_id"] or not metadata["channel_name"]:
         raise RuntimeError("Could not resolve channel from URL")
 
-    channel_id = lines[0]
-    channel_name = lines[1]
-    channel_url = lines[2]
+    channel_id = metadata["channel_id"]
+    channel_name = metadata["channel_name"]
+    channel_url = metadata["channel_url"]
 
     # Extract handle from URL if present
     handle: str | None = None

@@ -184,6 +184,39 @@ def test_resolve_channel_uses_flat_playlist_for_metadata():
     ]
 
 
+def test_resolve_channel_falls_back_when_ytdlp_prints_na():
+    """yt-dlp can emit NA for flat channel fields; do not persist that as an id."""
+    calls: list[list[str]] = []
+
+    def fake_run_ytdlp(args):
+        calls.append(args)
+        if "--print" in args:
+            return "NA\nDavid Fragomeni\nNA\n"
+        if "--dump-single-json" in args:
+            return json.dumps(
+                {
+                    "id": "UCkcBDNWKUSczL9TIx-7h6Qw",
+                    "title": "David Fragomeni",
+                    "channel_url": "https://www.youtube.com/channel/UCkcBDNWKUSczL9TIx-7h6Qw",
+                    "thumbnails": [{"url": "https://example.test/channel.jpg"}],
+                }
+            )
+        return json.dumps({"thumbnails": [{"url": "https://example.test/avatar.jpg"}]})
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        meta = resolve_channel("https://www.youtube.com/@david.fragomeni")
+
+    assert meta["channel_id"] == "UCkcBDNWKUSczL9TIx-7h6Qw"
+    assert meta["channel_name"] == "David Fragomeni"
+    assert calls[1] == [
+        "--flat-playlist",
+        "--dump-single-json",
+        "--playlist-items",
+        "1",
+        "https://www.youtube.com/@david.fragomeni",
+    ]
+
+
 def test_run_ytdlp_rejects_invalid_base64_cookies(monkeypatch):
     """Bad cookie env values fail before spawning yt-dlp."""
     monkeypatch.delenv("YTDLP_COOKIES_PATH", raising=False)

@@ -4,6 +4,12 @@ export interface ApiResponse<T> {
   error?: string
 }
 
+export interface WaitlistJoinResult {
+  email: string
+  youtube_channel: string | null
+  transcript_minutes: number
+}
+
 export interface ChannelMeta {
   channel_id: string
   channel_name: string
@@ -41,6 +47,113 @@ export interface PlaylistVideos {
 export interface VideoList {
   channel_id: string
   videos: Video[]
+}
+
+export interface ChannelSummary {
+  channel_id: string
+  channel_name: string
+  channel_handle: string | null
+  avatar_url: string | null
+  video_count: number
+  has_profile: boolean
+  latest_run_status: string | null
+  updated_at: string | null
+}
+
+export interface ChannelList {
+  channels: ChannelSummary[]
+}
+
+export interface ChannelRefreshResult {
+  channel_id: string
+  added: number
+  total: number
+}
+
+export interface RetryFailedResult {
+  run_id: string
+  channel_id: string
+  retried: number
+  status: string
+}
+
+export interface UsageRemaining {
+  tier_key: string
+  display_name: string
+  monthly_transcript_seconds: number
+  credit_transcript_seconds: number
+  transcript_seconds_used: number
+  transcript_seconds_remaining: number
+  monthly_chat_messages: number
+  chat_messages_used: number
+  chat_messages_remaining: number
+  max_transcript_seconds_per_run: number
+  videos_used: number
+  monthly_token_limit: number
+  tokens_used: number
+  tokens_remaining: number
+  monthly_cost_limit_usd: number
+  cost_used_usd: number
+  cost_remaining_usd: number
+}
+
+export interface UsageSummary {
+  enforced: boolean
+  quota: {
+    tier_key: string
+    display_name: string
+    monthly_transcript_seconds: number
+    credit_transcript_seconds: number
+    monthly_chat_messages: number
+    max_transcript_seconds_per_run: number
+    monthly_token_limit: number
+    monthly_cost_limit_usd: number
+    max_concurrent_runs: number
+    chat_per_minute_limit: number
+  }
+  usage: {
+    videos: number
+    transcript_seconds: number
+    chat_messages: number
+    input_tokens: number
+    output_tokens: number
+    total_tokens: number
+    cost_usd: number
+  }
+  remaining: UsageRemaining
+}
+
+export interface PipelineCost {
+  estimated_cost_usd: number
+  estimated_transcript_seconds: number
+  video_count: number
+  total_input_tokens: number
+  selection_count: number
+  budget?: UsageRemaining
+}
+
+export interface PipelineVideoState {
+  status: string
+  title?: string
+  [key: string]: unknown
+}
+
+export interface PipelineStageState {
+  status: string
+  total?: number
+  completed?: number
+  videos?: Record<string, PipelineVideoState>
+}
+
+export interface PipelineState {
+  run_id?: string
+  status: string
+  current_stage?: string
+  stages?: Record<string, PipelineStageState>
+  error?: string
+  started_at?: string
+  completed_at?: string
+  generated_files?: unknown
 }
 
 export interface Selection {
@@ -131,4 +244,45 @@ export interface Profile {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  sources?: ChatSource[]
+  unknownSourceIds?: string[]
+  id?: string
+  created_at?: string
+  sequence?: number
+}
+
+export interface ChatSource {
+  source_id: string
+  kind?: string
+  chunk_id?: string
+  video_id: string
+  title?: string
+  upload_date?: string
+  start_seconds: number
+  end_seconds?: number
+  quote?: string
+}
+
+export interface ChatSessionSummary {
+  id: string
+  channel_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface PersistedChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources: ChatSource[]
+  unknown_source_ids: string[]
+  created_at: string
+  sequence: number
+}
+
+export interface ChatSessionDetail {
+  session: ChatSessionSummary
+  messages: PersistedChatMessage[]
 }

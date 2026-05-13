@@ -1,256 +1,194 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 
 import { api } from './api'
-import PipelineStepper from './components/PipelineStepper'
-import ChannelInputPage from './pages/ChannelInputPage'
-import ChatPage from './pages/ChatPage'
-import ProfilePage from './pages/ProfilePage'
-import SummaryProgressPage from './pages/SummaryProgressPage'
-import TranscriptProgressPage from './pages/TranscriptProgressPage'
-import VideoListPage from './pages/VideoListPage'
-import { useSSE } from './hooks/useSSE'
-import type { ChannelMeta, Stage, StageStatus } from './types'
-import { STAGES } from './types'
+import { clearChannelProfilerState, setAccessToken } from './authState'
+import AuthPage from './pages/AuthPage'
+import LandingPage from './pages/LandingPage'
+import StudioPage from './pages/StudioPage'
+import WaitlistPage from './pages/WaitlistPage'
+import { supabase } from './lib/supabase'
 
-type AppScreen = 'channel_input' | 'video_list' | 'transcript_progress' | 'summary_progress' | 'profile' | 'chat'
+type AppRoute = '/' | '/waitlist' | '/login' | '/channels'
 
-function getInitialScreen(): AppScreen {
-  const saved = localStorage.getItem('cp_channel_id')
-  return saved ? 'video_list' : 'channel_input'
+const PENDING_CHANNEL_URL_KEY = 'cp_pending_channel_url'
+
+function normalizeRoute(pathname: string): AppRoute {
+  if (pathname === '/waitlist') return '/waitlist'
+  if (pathname === '/login') return '/login'
+  if (pathname === '/channels') return '/channels'
+  return '/'
 }
 
 function App() {
+  const [authReady, setAuthReady] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
   const [healthy, setHealthy] = useState<boolean | null>(null)
-  const [screen, setScreen] = useState<AppScreen>(getInitialScreen)
-  const [channel, setChannel] = useState<ChannelMeta | null>(null)
-  const [stages, setStages] = useState<Stage[]>(STAGES)
-  const [chatSeed, setChatSeed] = useState<string | undefined>()
+  const [route, setRoute] = useState<AppRoute>(() => normalizeRoute(window.location.pathname))
+  const [channelInputUrl, setChannelInputUrl] = useState(() => sessionStorage.getItem(PENDING_CHANNEL_URL_KEY) ?? '')
+  const [autoAnalyzeChannelInput, setAutoAnalyzeChannelInput] = useState(false)
 
-  const channelId = channel?.channel_id ?? null
-  const { state: pipelineState } = useSSE(channelId)
+  const navigate = useCallback((nextRoute: AppRoute, options?: { replace?: boolean }) => {
+    const method = options?.replace ? 'replaceState' : 'pushState'
+    if (window.location.pathname !== nextRoute) {
+      window.history[method](null, '', nextRoute)
+    }
+    setRoute(nextRoute)
+  }, [])
+
+  const resetAppState = useCallback(() => {
+    clearChannelProfilerState()
+    setChannelInputUrl('')
+    setAutoAnalyzeChannelInput(false)
+  }, [])
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
+    const normalized = normalizeRoute(window.location.pathname)
+    if (normalized !== window.location.pathname) {
+      window.history.replaceState(null, '', normalized)
+    }
+
+    const handlePopState = () => {
+      setRoute(normalizeRoute(window.location.pathname))
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+
+    function applySession(nextSession: Session | null) {
+      const nextUserId = nextSession?.user.id ?? null
+      setAccessToken(nextSession?.access_token ?? null)
+      if (nextUserId) {
+        const previousUserId = localStorage.getItem('cp_auth_user_id')
+        if (previousUserId !== nextUserId) {
+          resetAppState()
+        }
+        localStorage.setItem('cp_auth_user_id', nextUserId)
+      } else {
+        resetAppState()
+      }
+      setSession(nextSession)
+      setAuthReady(true)
+    }
+
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) applySession(data.session)
+    })
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      applySession(nextSession)
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [resetAppState])
+
+  useEffect(() => {
+    api
+      .health()
       .then((data) => setHealthy(data.ok === true))
       .catch(() => setHealthy(false))
   }, [])
 
   useEffect(() => {
-    const savedId = localStorage.getItem('cp_channel_id')
-    const savedName = localStorage.getItem('cp_channel_name')
-    const savedHandle = localStorage.getItem('cp_channel_handle')
-    const savedAvatar = localStorage.getItem('cp_channel_avatar')
-    if (savedId && savedName) {
-      const meta: ChannelMeta = {
-        channel_id: savedId,
-        channel_name: savedName,
-        channel_handle: savedHandle,
-        avatar_url: savedAvatar,
+    if (!authReady) return
+    if (!session && route === '/channels') {
+      navigate('/login', { replace: true })
+    }
+    if (session && route === '/login') {
+      const pendingUrl = sessionStorage.getItem(PENDING_CHANNEL_URL_KEY)
+      if (pendingUrl) {
+        setChannelInputUrl(pendingUrl)
+        setAutoAnalyzeChannelInput(true)
       }
-      setChannel(meta)
-
-      // Restore pipeline stage state without opening SSE
-      api.pipelineState(savedId).then((res) => {
-        if (!res.ok || !res.data) return
-        const state = res.data
-        const transcriptStatus = state.stages?.transcripts?.status
-        const summaryStatus = state.stages?.summaries?.status
-        const profileStatus = state.stages?.profile?.status
-        const currentStage = state.current_stage
-        const pipelineStatus = state.status
-
-        const nextStages: Stage[] = STAGES.map((s) => {
-          if (s.id === 'channel_input') return { ...s, status: 'done' as StageStatus }
-          if (s.id === 'video_list') return { ...s, status: 'done' as StageStatus }
-          if (s.id === 'transcripts') {
-            if (transcriptStatus === 'done') return { ...s, status: 'done' }
-            if (currentStage === 'transcripts' && pipelineStatus === 'running') return { ...s, status: 'active' }
-            return { ...s, status: 'pending' }
-          }
-          const isAwaitingConfirm = pipelineStatus === 'awaiting_confirm_summaries'
-          if (s.id === 'summaries') {
-            if (summaryStatus === 'done') return { ...s, status: 'done' }
-            if (currentStage === 'summaries' && pipelineStatus === 'running') return { ...s, status: 'active' }
-            if (isAwaitingConfirm) return { ...s, status: 'active' }
-            if (transcriptStatus === 'done') return { ...s, status: 'pending' }
-            return { ...s, status: 'pending' }
-          }
-          if (s.id === 'profile') {
-            if (profileStatus === 'done') return { ...s, status: 'done' }
-            if (currentStage === 'profile' && pipelineStatus === 'running') return { ...s, status: 'active' }
-            if (summaryStatus === 'done') return { ...s, status: 'pending' }
-            return { ...s, status: 'pending' }
-          }
-          return s
-        })
-        setStages(nextStages)
-
-        // Determine which screen to show based on restored state
-        if (pipelineStatus === 'completed' || profileStatus === 'done') {
-          setScreen('profile')
-        } else if (pipelineStatus === 'running') {
-          if (currentStage === 'transcripts') {
-            setScreen('transcript_progress')
-          } else if (currentStage === 'summaries') {
-            setScreen('summary_progress')
-          } else if (currentStage === 'profile') {
-            // Stay on summary progress while profile runs in background
-            setScreen('summary_progress')
-          }
-        } else if (pipelineStatus === 'awaiting_confirm_summaries') {
-          setScreen('summary_progress')
-        } else if (pipelineStatus === 'failed') {
-          if (summaryStatus === 'done' || currentStage === 'done') {
-            setScreen('summary_progress')
-          } else if (transcriptStatus === 'done') {
-            setScreen('transcript_progress')
-          }
-        } else if (transcriptStatus === 'done') {
-          if (state.stages?.summaries) {
-            setScreen('summary_progress')
-          } else {
-            setScreen('transcript_progress')
-          }
-        }
-      })
+      navigate('/channels', { replace: true })
     }
-  }, [])
+  }, [authReady, session, route, navigate])
 
-  // Auto-advance to profile when backend finishes aggregation
-  useEffect(() => {
-    if (!pipelineState) return
-    const profileStatus = pipelineState.stages?.profile?.status
-    const pipelineStatus = pipelineState.status
-    if (profileStatus === 'done' || pipelineStatus === 'completed') {
-      setScreen('profile')
-      setStages((prev) =>
-        prev.map((s) =>
-          s.id === 'profile' ? { ...s, status: 'done' } : s.id === 'summaries' ? { ...s, status: 'done' } : s
-        )
-      )
-    }
-  }, [pipelineState])
+  const handleLandingAnalyze = (url: string) => {
+    sessionStorage.setItem(PENDING_CHANNEL_URL_KEY, url)
+    setChannelInputUrl(url)
+    setAutoAnalyzeChannelInput(true)
+    navigate(session ? '/channels' : '/login')
+  }
 
-  const handleResolved = (meta: ChannelMeta) => {
-    setChannel(meta)
-    localStorage.setItem('cp_channel_id', meta.channel_id)
-    localStorage.setItem('cp_channel_name', meta.channel_name)
-    if (meta.channel_handle) localStorage.setItem('cp_channel_handle', meta.channel_handle)
-    if (meta.avatar_url) localStorage.setItem('cp_channel_avatar', meta.avatar_url)
-    setScreen('video_list')
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === 'channel_input' ? { ...s, status: 'done' } : s.id === 'video_list' ? { ...s, status: 'active' } : s
-      )
+  const handleChannelInputConsumed = () => {
+    sessionStorage.removeItem(PENDING_CHANNEL_URL_KEY)
+    setChannelInputUrl('')
+    setAutoAnalyzeChannelInput(false)
+  }
+
+  const handleSignOut = async () => {
+    resetAppState()
+    setAccessToken(null)
+    setSession(null)
+    await supabase?.auth.signOut()
+    navigate('/login', { replace: true })
+  }
+
+  if (!authReady) {
+    return (
+      <div className="app-boot">
+        <div className="app-boot-card">
+          <span className="app-boot-mark">T</span>
+          <span className="app-boot-spinner" aria-hidden />
+          <span>Loading Trace</span>
+        </div>
+      </div>
     )
   }
 
-  const handleRunPipeline = async () => {
-    if (!channel) return
-    const res = await fetch('/api/pipeline/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: channel.channel_id }),
-    })
-    const data = await res.json()
-    if (data.data?.status === 'started' || data.data?.status === 'already_running') {
-      setStages((prev) =>
-        prev.map((s) =>
-          s.id === 'video_list'
-            ? { ...s, status: 'done' }
-            : s.id === 'transcripts'
-            ? { ...s, status: 'active' }
-            : s
-        )
-      )
-      setScreen('transcript_progress')
-    }
-  }
-
-  const handleTranscriptComplete = () => {
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === 'transcripts' ? { ...s, status: 'done' } : s.id === 'summaries' ? { ...s, status: 'active' } : s
-      )
-    )
-    setScreen('summary_progress')
-  }
-
-  const handleSummaryComplete = () => {
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === 'summaries' ? { ...s, status: 'done' } : s.id === 'profile' ? { ...s, status: 'active' } : s
-      )
-    )
-    // Do not change screen here; the useEffect watching pipelineState will
-    // advance to 'profile' once the backend signals profile is done.
-  }
-
-  const handleStageClick = (stage: Stage) => {
-    if (stage.id === 'channel_input') {
-      setScreen('channel_input')
-    } else if (stage.id === 'video_list' && channel) {
-      setScreen('video_list')
-    } else if (stage.id === 'transcripts' && channel) {
-      setScreen('transcript_progress')
-    } else if (stage.id === 'summaries' && channel) {
-      setScreen('summary_progress')
-    } else if (stage.id === 'profile' && channel) {
-      setScreen('profile')
-    } else if (stage.id === 'chat' && channel) {
-      const profileStage = stages.find((s) => s.id === 'profile')
-      if (profileStage?.status === 'done') {
-        setScreen('chat')
-      }
-    }
-  }
-
-  const handleStartChat = (seed?: string) => {
-    setChatSeed(seed)
-    setScreen('chat')
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === 'chat' ? { ...s, status: 'active' } : s
-      )
+  if (route === '/') {
+    return (
+      <LandingPage
+        signedIn={Boolean(session)}
+        onLogin={() => navigate('/login')}
+        onOpenChannels={() => navigate(session ? '/channels' : '/login')}
+        onAnalyze={handleLandingAnalyze}
+        onJoinWaitlist={() => navigate('/waitlist')}
+      />
     )
   }
 
-  const handleChatComplete = () => {
-    setStages((prev) =>
-      prev.map((s) =>
-        s.id === 'chat' ? { ...s, status: 'done' } : s
-      )
+  if (route === '/waitlist') {
+    return (
+      <WaitlistPage
+        signedIn={Boolean(session)}
+        onBackHome={() => navigate('/')}
+        onLogin={() => navigate('/login')}
+        onOpenChannels={() => navigate(session ? '/channels' : '/login')}
+      />
+    )
+  }
+
+  if (route === '/login' || !session) {
+    return (
+      <AuthPage
+        onBackHome={() => navigate('/')}
+        onJoinWaitlist={() => navigate('/waitlist')}
+      />
     )
   }
 
   return (
-    <div className="min-h-screen bg-ios-bg dark:bg-black">
-      <PipelineStepper stages={stages} onStageClick={handleStageClick} />
-
-      {healthy === false && (
-        <div className="bg-ios-red/10 text-ios-red text-center text-[13px] py-2">
-          Backend unavailable — is the server running?
-        </div>
-      )}
-
-      {screen === 'channel_input' && <ChannelInputPage onResolved={handleResolved} />}
-      {screen === 'video_list' && channel && (
-        <VideoListPage channel={channel} onRunPipeline={handleRunPipeline} />
-      )}
-      {screen === 'transcript_progress' && channel && (
-        <TranscriptProgressPage channel={channel} onComplete={handleTranscriptComplete} onBack={() => setScreen('video_list')} />
-      )}
-      {screen === 'summary_progress' && channel && (
-        <SummaryProgressPage channel={channel} onComplete={handleSummaryComplete} onBack={() => setScreen('video_list')} />
-      )}
-      {screen === 'profile' && channel && (
-        <ProfilePage channel={channel} onBack={() => setScreen('video_list')} onStartChat={handleStartChat} />
-      )}
-      {screen === 'chat' && channel && (
-        <ChatPage channel={channel} onBack={() => setScreen('profile')} onComplete={handleChatComplete} initialInput={chatSeed} />
-      )}
-    </div>
+    <StudioPage
+      session={session}
+      healthy={healthy}
+      initialUrl={channelInputUrl}
+      autoSubmitInitialUrl={autoAnalyzeChannelInput}
+      onInitialUrlConsumed={handleChannelInputConsumed}
+      onSignOut={handleSignOut}
+    />
   )
 }
 

@@ -1,23 +1,15 @@
 """Pure-Python aggregation of per-video summaries into a channel profile."""
 
-import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.storage import get_channel_dir, read_json, write_json
-
-REQUIRED_SUMMARY_FIELDS = {
-    "video_id",
-    "title",
-    "upload_date",
-    "core_topic",
-    "key_claims",
-    "recurring_themes",
-    "tone_markers",
-    "notable_opinions",
-    "people_or_things_referenced",
-}
+from backend.pipeline.schema_versions import (
+    PROFILE_SCHEMA_VERSION,
+    SUMMARY_REQUIRED_FIELDS,
+    is_summary_current,
+)
+from backend.storage import get_channel_dir, load_channel_meta, read_json, save_profile, write_json
 
 
 def _load_summaries(channel_dir: Path) -> list[dict]:
@@ -31,7 +23,9 @@ def _load_summaries(channel_dir: Path) -> list[dict]:
         data = read_json(path)
         if not isinstance(data, dict):
             continue
-        if not REQUIRED_SUMMARY_FIELDS.issubset(data.keys()):
+        if not SUMMARY_REQUIRED_FIELDS.issubset(data.keys()):
+            continue
+        if not is_summary_current(data):
             continue
         summaries.append(data)
     return summaries
@@ -40,6 +34,55 @@ def _load_summaries(channel_dir: Path) -> list[dict]:
 def _sort_summaries(summaries: list[dict]) -> list[dict]:
     """Sort summaries ascending by upload_date (YYYYMMDD string sort)."""
     return sorted(summaries, key=lambda s: s.get("upload_date", ""))
+
+
+def _add_string_counts(
+    counter: Counter,
+    display: dict[str, str],
+    values: list | None,
+) -> None:
+    for value in values or []:
+        if isinstance(value, str) and value.strip():
+            label = value.strip()
+            key = label.lower()
+            counter[key] += 1
+            if key not in display:
+                display[key] = label
+
+
+def _ranked_items(
+    counter: Counter,
+    display: dict[str, str],
+    label_key: str,
+    limit: int | None = None,
+) -> list[dict]:
+    items = [
+        {label_key: display[key], "count": count}
+        for key, count in counter.most_common(limit)
+    ]
+    items.sort(key=lambda item: (-item["count"], str(item[label_key]).lower()))
+    return items
+
+
+def _summary_claim_metrics(summary: dict) -> dict:
+    claim_count = 0
+    supported_claim_count = 0
+    for field in ("key_claims", "notable_opinions"):
+        claims = summary.get(field, [])
+        if not isinstance(claims, list):
+            continue
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            claim_count += 1
+            if claim.get("evidence"):
+                supported_claim_count += 1
+    unsupported_claim_count = claim_count - supported_claim_count
+    return {
+        "claim_count": claim_count,
+        "supported_claim_count": supported_claim_count,
+        "unsupported_claim_count": unsupported_claim_count,
+    }
 
 
 def _compute_rollups(summaries: list[dict]) -> dict:
@@ -51,53 +94,96 @@ def _compute_rollups(summaries: list[dict]) -> dict:
     theme_counter: Counter = Counter()
     referenced_counter: Counter = Counter()
     tone_counter: Counter = Counter()
+    concept_counter: Counter = Counter()
+    tactic_counter: Counter = Counter()
+    question_counter: Counter = Counter()
+    audience_counter: Counter = Counter()
 
     theme_display: dict[str, str] = {}
     referenced_display: dict[str, str] = {}
     tone_display: dict[str, str] = {}
+    concept_display: dict[str, str] = {}
+    tactic_display: dict[str, str] = {}
+    question_display: dict[str, str] = {}
+    audience_display: dict[str, str] = {}
+
+    claim_count = 0
+    supported_claim_count = 0
+    unsupported_claim_count = 0
+    confidence_total = 0.0
+    confidence_count = 0
 
     for summary in summaries:
-        for theme in summary.get("recurring_themes", []) or []:
-            if isinstance(theme, str):
-                key = theme.lower()
-                theme_counter[key] += 1
-                if key not in theme_display:
-                    theme_display[key] = theme
-        for ref in summary.get("people_or_things_referenced", []) or []:
-            if isinstance(ref, str):
-                key = ref.lower()
-                referenced_counter[key] += 1
-                if key not in referenced_display:
-                    referenced_display[key] = ref
-        for tone in summary.get("tone_markers", []) or []:
-            if isinstance(tone, str):
-                key = tone.lower()
-                tone_counter[key] += 1
-                if key not in tone_display:
-                    tone_display[key] = tone
+        _add_string_counts(theme_counter, theme_display, summary.get("recurring_themes"))
+        _add_string_counts(
+            referenced_counter,
+            referenced_display,
+            summary.get("people_or_things_referenced"),
+        )
+        _add_string_counts(tone_counter, tone_display, summary.get("tone_markers"))
+        _add_string_counts(concept_counter, concept_display, summary.get("concepts"))
+        _add_string_counts(tactic_counter, tactic_display, summary.get("tactics"))
+        _add_string_counts(
+            question_counter,
+            question_display,
+            summary.get("questions_answered"),
+        )
 
-    all_themes = [
-        {"theme": theme_display[key], "count": count}
-        for key, count in theme_counter.most_common()
-    ]
-    # most_common returns count desc; for ties we want alphabetical asc by display label
-    all_themes.sort(key=lambda x: (-x["count"], x["theme"].lower()))
+        audience = summary.get("audience")
+        if isinstance(audience, str) and audience.strip():
+            _add_string_counts(audience_counter, audience_display, [audience])
 
-    all_referenced = [
-        {"name": referenced_display[key], "count": count}
-        for key, count in referenced_counter.most_common(50)
-    ]
-    all_referenced.sort(key=lambda x: (-x["count"], x["name"].lower()))
+        metrics = _summary_claim_metrics(summary)
+        claim_count += metrics["claim_count"]
+        supported_claim_count += metrics["supported_claim_count"]
+        unsupported_claim_count += metrics["unsupported_claim_count"]
+
+        confidence = summary.get("summary_confidence")
+        if isinstance(confidence, int | float):
+            confidence_total += float(confidence)
+            confidence_count += 1
+
+    all_themes = _ranked_items(theme_counter, theme_display, "theme")
+    all_referenced = _ranked_items(referenced_counter, referenced_display, "name", 50)
+    all_concepts = _ranked_items(concept_counter, concept_display, "concept", 50)
+    all_tactics = _ranked_items(tactic_counter, tactic_display, "tactic", 50)
+    all_questions_answered = _ranked_items(
+        question_counter,
+        question_display,
+        "question",
+        50,
+    )
 
     tone_distribution = {tone_display[key]: count for key, count in tone_counter.items()}
+    audience_distribution = {
+        audience_display[key]: count for key, count in audience_counter.items()
+    }
+    evidence_rate = supported_claim_count / claim_count if claim_count else 1.0
 
     return {
         "all_themes": all_themes,
         "all_referenced": all_referenced,
         "tone_distribution": tone_distribution,
+        "all_concepts": all_concepts,
+        "all_tactics": all_tactics,
+        "all_questions_answered": all_questions_answered,
+        "audience_distribution": audience_distribution,
+        "summary_quality": {
+            "claim_count": claim_count,
+            "supported_claim_count": supported_claim_count,
+            "unsupported_claim_count": unsupported_claim_count,
+            "evidence_rate": round(evidence_rate, 3),
+            "average_confidence": (
+                round(confidence_total / confidence_count, 3)
+                if confidence_count
+                else 0.0
+            ),
+        },
         "theme_display": theme_display,
         "referenced_display": referenced_display,
         "tone_display": tone_display,
+        "concept_display": concept_display,
+        "tactic_display": tactic_display,
     }
 
 
@@ -107,7 +193,7 @@ def aggregate(channel_id: str) -> dict:
     Returns the profile dict and writes it to disk.
     """
     channel_dir = get_channel_dir(channel_id)
-    meta = read_json(channel_dir / "meta.json") or {}
+    meta = load_channel_meta(channel_id) or read_json(channel_dir / "meta.json") or {}
 
     summaries = _load_summaries(channel_dir)
     sorted_summaries = _sort_summaries(summaries)
@@ -126,18 +212,43 @@ def aggregate(channel_id: str) -> dict:
         "all_themes": [],
         "all_referenced": [],
         "tone_distribution": {},
+        "all_concepts": [],
+        "all_tactics": [],
+        "all_questions_answered": [],
+        "audience_distribution": {},
+        "summary_quality": {
+            "claim_count": 0,
+            "supported_claim_count": 0,
+            "unsupported_claim_count": 0,
+            "evidence_rate": 1.0,
+            "average_confidence": 0.0,
+        },
         "theme_display": {},
         "referenced_display": {},
         "tone_display": {},
+        "concept_display": {},
+        "tactic_display": {},
     }
 
     theme_display = rollups.get("theme_display", {})
     referenced_display = rollups.get("referenced_display", {})
     tone_display = rollups.get("tone_display", {})
+    concept_display = rollups.get("concept_display", {})
+    tactic_display = rollups.get("tactic_display", {})
 
     videos = []
     for summary in sorted_summaries:
-        video = dict(summary)
+        video = {
+            key: value
+            for key, value in summary.items()
+            if key not in {
+                "schema_version",
+                "summary_schema_version",
+                "model",
+                "prompt_hash",
+                "generated_at",
+            }
+        }
         if "recurring_themes" in video:
             video["recurring_themes"] = [
                 theme_display.get(theme.lower(), theme) if isinstance(theme, str) else theme
@@ -153,15 +264,36 @@ def aggregate(channel_id: str) -> dict:
                 referenced_display.get(ref.lower(), ref) if isinstance(ref, str) else ref
                 for ref in video["people_or_things_referenced"]
             ]
+        if "concepts" in video:
+            video["concepts"] = [
+                (
+                    concept_display.get(concept.lower(), concept)
+                    if isinstance(concept, str)
+                    else concept
+                )
+                for concept in video["concepts"]
+            ]
+        if "tactics" in video:
+            video["tactics"] = [
+                tactic_display.get(tactic.lower(), tactic) if isinstance(tactic, str) else tactic
+                for tactic in video["tactics"]
+            ]
         videos.append(video)
 
     # Remove internal display maps from the public rollups payload
     public_rollups = {
         k: v for k, v in rollups.items()
-        if k not in {"theme_display", "referenced_display", "tone_display"}
+        if k not in {
+            "theme_display",
+            "referenced_display",
+            "tone_display",
+            "concept_display",
+            "tactic_display",
+        }
     }
 
     profile = {
+        "schema_version": PROFILE_SCHEMA_VERSION,
         "channel_id": channel_id,
         "channel_name": meta.get("channel_name", ""),
         "channel_handle": meta.get("channel_handle"),
@@ -174,4 +306,5 @@ def aggregate(channel_id: str) -> dict:
     }
 
     write_json(channel_dir / "profile.json", profile)
+    save_profile(channel_id, "manual", profile)
     return profile

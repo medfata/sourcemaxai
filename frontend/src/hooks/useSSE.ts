@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-
-interface PipelineState {
-  status: string
-  current_stage?: string
-  stages?: Record<
-    string,
-    {
-      status: string
-      total: number
-      completed: number
-      videos: Record<string, { status: string; title: string }>
-    }
-  >
-  error?: string
-  started_at?: string
-}
+import { apiStreamFetch } from '../api'
+import type { PipelineState } from '../types'
 
 interface UseSSEReturn {
   state: PipelineState | null
@@ -24,56 +10,99 @@ interface UseSSEReturn {
 export function useSSE(channelId: string | null): UseSSEReturn {
   const [state, setState] = useState<PipelineState | null>(null)
   const [connected, setConnected] = useState(false)
-  const esRef = useRef<EventSource | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    setState(null)
+    setConnected(false)
     if (!channelId) return
 
-    const es = new EventSource(`/api/pipeline/stream?channel_id=${channelId}`)
-    esRef.current = es
+    const activeChannelId = channelId
+    const abort = new AbortController()
+    abortRef.current = abort
 
-    es.addEventListener('initial_state', (e) => {
-      setState(JSON.parse(e.data))
-      setConnected(true)
-    })
-
-    es.addEventListener('video_update', (e) => {
-      const data = JSON.parse(e.data)
-      setState((prev) => {
-        if (!prev) return prev
-        const stageId = data.stage_id || 'transcripts'
-        const stage = prev.stages?.[stageId]
-        if (!stage) return prev
-        const updated = {
-          ...prev,
-          stages: {
-            ...prev.stages,
-            [stageId]: { ...stage, ...data.stage },
-          },
-        }
-        return updated
-      })
-    })
-
-    es.addEventListener('stage_update', (e) => {
-      setState(JSON.parse(e.data))
-    })
-
-    es.addEventListener('pipeline_complete', (e) => {
-      setState(JSON.parse(e.data))
-    })
-
-    es.addEventListener('pipeline_error', (e) => {
-      setState(JSON.parse(e.data))
-    })
-
-    es.onerror = () => {
-      setConnected(false)
+    function applyEvent(event: string, rawData: string) {
+      if (!rawData) return
+      if (event === 'initial_state') {
+        setState(JSON.parse(rawData))
+        setConnected(true)
+        return
+      }
+      if (event === 'video_update') {
+        const data = JSON.parse(rawData)
+        setState((prev) => {
+          if (!prev) return prev
+          const stageId = data.stage_id || 'transcripts'
+          const stage = prev.stages?.[stageId]
+          if (!stage) return prev
+          return {
+            ...prev,
+            stages: {
+              ...prev.stages,
+              [stageId]: { ...stage, ...data.stage },
+            },
+          }
+        })
+        return
+      }
+      if (
+        event === 'stage_update' ||
+        event === 'pipeline_complete' ||
+        event === 'pipeline_error' ||
+        event === 'pipeline_cancelled'
+      ) {
+        setState(JSON.parse(rawData))
+      }
     }
 
+    async function readStream(response: Response) {
+      if (!response.body) throw new Error('SSE response has no body')
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (!abort.signal.aborted) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let idx = buffer.indexOf('\n\n')
+          while (idx !== -1) {
+            const block = buffer.slice(0, idx)
+            buffer = buffer.slice(idx + 2)
+            let event = 'message'
+            const dataLines: string[] = []
+            for (const line of block.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim()
+              if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+            }
+            applyEvent(event, dataLines.join('\n'))
+            idx = buffer.indexOf('\n\n')
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    }
+
+    async function connect() {
+      try {
+        const response = await apiStreamFetch(
+          `/api/pipeline/stream?channel_id=${encodeURIComponent(activeChannelId)}`,
+          { signal: abort.signal },
+        )
+        if (!response.ok) throw new Error(`SSE HTTP ${response.status}`)
+        await readStream(response)
+      } catch {
+        if (!abort.signal.aborted) setConnected(false)
+      }
+    }
+
+    connect()
+
     return () => {
-      es.close()
-      esRef.current = null
+      abort.abort()
+      abortRef.current = null
+      setConnected(false)
     }
   }, [channelId])
 

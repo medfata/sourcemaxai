@@ -3,7 +3,6 @@
 import json
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,8 +11,15 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client():
+    from backend.auth import CurrentUser, get_current_user
     from backend.main import app
 
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        owner_id="test-user",
+        email="test@example.com",
+        role="authenticated",
+        claims={"sub": "test-user", "role": "authenticated"},
+    )
     return TestClient(app)
 
 
@@ -36,16 +42,14 @@ def temp_data_dir(monkeypatch):
 
 def _setup_channel(tmpdir: str, channel_id: str):
     """Write meta.json and videos.json for a test channel."""
-    channel_dir = Path(tmpdir) / "channels" / channel_id
-    channel_dir.mkdir(parents=True, exist_ok=True)
+    from backend import storage
+
     meta = {
         "channel_id": channel_id,
         "channel_name": "Test Channel",
         "channel_handle": "@test",
         "avatar_url": "http://example.com/avatar.jpg",
     }
-    with open(channel_dir / "meta.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f)
     videos = [{
         "id": f"vid_{i}",
         "title": f"Video {i}",
@@ -54,8 +58,12 @@ def _setup_channel(tmpdir: str, channel_id: str):
         "view_count": 100,
         "thumbnail": "http://example.com/thumb.jpg",
     } for i in range(5)]
-    with open(channel_dir / "videos.json", "w", encoding="utf-8") as f:
-        json.dump({"videos": videos}, f)
+
+    with storage.storage_owner("test-user"):
+        channel_dir = storage.get_channel_dir(channel_id)
+        storage.write_json(channel_dir / "meta.json", meta)
+        storage.write_json(channel_dir / "videos.json", {"videos": videos})
+
     return channel_dir
 
 
@@ -74,7 +82,12 @@ def test_get_playlists_cached(client, temp_data_dir):
     channel_dir = _setup_channel(temp_data_dir, channel_id)
     playlists = [
         {"id": "PL1", "title": "Playlist 1", "video_count": 5, "thumbnail": None},
-        {"id": "PL2", "title": "Playlist 2", "video_count": 10, "thumbnail": "http://example.com/pl2.jpg"},
+        {
+            "id": "PL2",
+            "title": "Playlist 2",
+            "video_count": 10,
+            "thumbnail": "http://example.com/pl2.jpg",
+        },
     ]
     with open(channel_dir / "playlists.json", "w", encoding="utf-8") as f:
         json.dump({"playlists": playlists}, f)
@@ -107,7 +120,8 @@ def test_get_playlists_fetch(client, temp_data_dir):
 
     # Verify persisted to disk
     from backend import storage
-    cached = storage.load_playlists(channel_id)
+    with storage.storage_owner("test-user"):
+        cached = storage.load_playlists(channel_id)
     assert cached is not None
     assert len(cached) == 1
     assert cached[0]["id"] == "PL1"
@@ -153,5 +167,6 @@ def test_get_playlist_videos_fetch(client, temp_data_dir):
 
     # Verify persisted
     from backend import storage
-    cached = storage.load_playlist_video_ids(channel_id, "PL_new")
+    with storage.storage_owner("test-user"):
+        cached = storage.load_playlist_video_ids(channel_id, "PL_new")
     assert cached == ["v1", "v2"]

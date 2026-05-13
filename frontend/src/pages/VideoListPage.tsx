@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
 import { api } from '../api'
 import { formatRelativeDate } from '../utils/date'
 import type { ChannelMeta, Playlist, Video } from '../types'
@@ -196,58 +197,96 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     const subset = tab === 'videos' ? longVideos : shortVideos
     if (subset.length > 0) {
       quickActions = [
-        { label: 'Select all', onClick: () => selectVideoSubset(subset) },
-        { label: 'Select none', onClick: () => deselectSubset(subset) },
+        { label: 'All', onClick: () => selectVideoSubset(subset) },
+        { label: 'None', onClick: () => deselectSubset(subset) },
         { label: 'Last 50', onClick: () => selectLast50(subset) },
         { label: 'Last year', onClick: () => selectLastYear(subset) },
       ]
     }
   } else if (tab === 'playlists' && playlists.length > 0) {
     quickActions = [
-      { label: 'Select all playlists', onClick: selectAllPlaylists },
-      { label: 'Select none', onClick: selectNonePlaylists },
+      { label: 'All', onClick: selectAllPlaylists },
+      { label: 'None', onClick: selectNonePlaylists },
     ]
   }
 
   const tabs = [
-    { id: 'videos' as const, label: `Videos (${longVideos.length})` },
-    { id: 'playlists' as const, label: `Playlists (${playlists.length})` },
-    { id: 'shorts' as const, label: `Shorts (${shortVideos.length})` },
+    { id: 'videos' as const, label: 'Videos', count: longVideos.length },
+    { id: 'playlists' as const, label: 'Playlists', count: playlists.length },
+    { id: 'shorts' as const, label: 'Shorts', count: shortVideos.length },
   ]
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
-        <div className="text-ios-text-secondary text-[17px]">Loading videos…</div>
+      <div className="flex items-center justify-center min-h-[100svh] bg-cream dark:bg-ink-900">
+        <div className="flex items-center gap-3 text-ink-400">
+          <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+          <span className="text-[14px]">Loading library</span>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="pb-24">
-      {/* Header */}
-      <div className="max-w-5xl mx-auto px-4 pt-4 pb-1">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {channel.avatar_url && (
-              <img src={channel.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
-            )}
-            <div>
-              <h2 className="text-[17px] font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-                {channel.channel_name}
-              </h2>
-              <p className="text-[13px] text-ios-text-secondary">
-                {videos.length} videos
-              </p>
+    <div className="min-h-[100svh] bg-cream dark:bg-ink-900 pb-32">
+      {/* Editorial hero */}
+      <div className="relative overflow-hidden border-b border-black/5 dark:border-white/10">
+        <div aria-hidden className="absolute inset-0 bg-gradient-mesh opacity-60" />
+        <div className="relative max-w-6xl mx-auto px-6 pt-12 pb-10">
+          <div className="flex items-end justify-between gap-6 flex-wrap">
+            <div className="flex items-center gap-5">
+              {channel.avatar_url ? (
+                <img src={channel.avatar_url} alt="" className="w-16 h-16 rounded-2xl object-cover ring-1 ring-black/5 dark:ring-white/10 shadow-soft" />
+              ) : (
+                <div className="w-16 h-16 rounded-2xl bg-ink-100 dark:bg-ink-700 flex items-center justify-center text-[24px] font-display text-ink-400">
+                  {channel.channel_name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <span className="text-[11px] uppercase tracking-[0.18em] text-ink-400">Curating</span>
+                <h1 className="font-display text-[40px] sm:text-[56px] leading-[0.98] tracking-tighter text-ink-900 dark:text-cream mt-1">
+                  {channel.channel_name}
+                </h1>
+                <p className="mt-1 text-[14px] text-ink-500 dark:text-white/50">
+                  <span className="font-mono">{videos.length}</span> videos available · select what to analyze
+                </p>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Tabs + quick actions */}
+      <div className="sticky top-0 z-30 glass border-b border-black/5 dark:border-white/10">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-1">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`relative px-3 py-2 text-[13px] font-medium transition-colors ${
+                  tab === t.id ? 'text-ink-900 dark:text-cream' : 'text-ink-400 hover:text-ink-700 dark:hover:text-white/70'
+                }`}
+              >
+                <span>{t.label}</span>
+                <span className={`ml-1.5 text-[11px] font-mono ${tab === t.id ? 'text-ink-400' : 'text-ink-300'}`}>{t.count}</span>
+                {tab === t.id && (
+                  <motion.span
+                    layoutId="tab-underline"
+                    className="absolute left-2 right-2 -bottom-px h-0.5 bg-ink-900 dark:bg-cream rounded-full"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+
           {quickActions.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1.5">
               {quickActions.map((action) => (
                 <button
                   key={action.label}
                   onClick={action.onClick}
-                  className="px-3.5 h-8 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[13px] text-ios-blue font-medium active:opacity-70 transition"
+                  className="px-3 h-8 rounded-full border border-black/[0.08] dark:border-white/10 text-[12px] text-ink-700 dark:text-white/70 hover:border-ink-900/30 hover:bg-white dark:hover:bg-white/5 transition-all"
                 >
                   {action.label}
                 </button>
@@ -257,245 +296,194 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="max-w-5xl mx-auto px-4 py-3 sticky top-0 z-30 bg-ios-bg dark:bg-black">
-        <div className="flex gap-1 p-1 bg-black/[0.05] dark:bg-white/[0.08] rounded-full w-fit">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-4 h-8 rounded-full text-[13px] font-medium transition-all ${
-                tab === t.id
-                  ? 'bg-ios-blue text-white shadow-sm'
-                  : 'text-ios-text-secondary active:opacity-70'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content Grid */}
-      <div className="max-w-5xl mx-auto px-4">
+      {/* Grid */}
+      <div className="max-w-6xl mx-auto px-6 pt-8">
         {tab === 'videos' && (
-          <>
-            {longVideos.length === 0 ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-[15px] text-ios-text-secondary">No long-form videos on this channel.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {longVideos.map((video) => {
-                  const isSelected = selectedIds.has(video.id)
-                  return (
-                    <div
-                      key={video.id}
-                      onClick={() => toggleVideo(video.id)}
-                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
-                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
-                      }`}
-                    >
-                      <div className="relative aspect-video">
-                        <img src={video.thumbnail} alt={video.title} loading="lazy"
-                          className="w-full h-full object-cover" />
-                        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[11px] font-medium">
-                          {formatDuration(video.duration)}
-                        </div>
-                        <div className="absolute top-2 right-2">
-                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            isSelected
-                              ? 'bg-ios-blue border-ios-blue'
-                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
-                          }`}>
-                            {isSelected && (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
-                          {video.title}
-                        </h3>
-                        <p className="mt-1 text-[12px] text-ios-text-secondary">
-                          {formatRelativeDate(video.upload_date)}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </>
+          longVideos.length === 0 ? (
+            <EmptyState text="No long-form videos on this channel." />
+          ) : (
+            <VideoGrid videos={longVideos} aspect="aspect-video" cols="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4" selectedIds={selectedIds} onToggle={toggleVideo} formatDuration={formatDuration} />
+          )
         )}
-
         {tab === 'shorts' && (
-          <>
-            {shortVideos.length === 0 ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-[15px] text-ios-text-secondary">No Shorts on this channel.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {shortVideos.map((video) => {
-                  const isSelected = selectedIds.has(video.id)
-                  return (
-                    <div
-                      key={video.id}
-                      onClick={() => toggleVideo(video.id)}
-                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
-                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
-                      }`}
-                    >
-                      <div className="relative aspect-[9/16]">
-                        <img src={video.thumbnail} alt={video.title} loading="lazy"
-                          className="w-full h-full object-cover" />
-                        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[11px] font-medium">
-                          {formatDuration(video.duration)}
-                        </div>
-                        <div className="absolute top-2 right-2">
-                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            isSelected
-                              ? 'bg-ios-blue border-ios-blue'
-                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
-                          }`}>
-                            {isSelected && (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
-                          {video.title}
-                        </h3>
-                        <p className="mt-1 text-[12px] text-ios-text-secondary">
-                          {formatRelativeDate(video.upload_date)}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </>
+          shortVideos.length === 0 ? (
+            <EmptyState text="No Shorts on this channel." />
+          ) : (
+            <VideoGrid videos={shortVideos} aspect="aspect-[9/16]" cols="grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" selectedIds={selectedIds} onToggle={toggleVideo} formatDuration={formatDuration} />
+          )
         )}
-
         {tab === 'playlists' && (
-          <>
-            {playlistsLoading ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-[15px] text-ios-text-secondary">Loading playlists…</p>
-              </div>
-            ) : playlistsError ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-[15px] text-ios-red">{playlistsError}</p>
-              </div>
-            ) : playlists.length === 0 ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-[15px] text-ios-text-secondary">This channel has no public playlists.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {playlists.map((playlist) => {
-                  const isSelected = selectedPlaylistIds.has(playlist.id)
-                  return (
-                    <div
-                      key={playlist.id}
-                      onClick={() => togglePlaylist(playlist.id)}
-                      className={`group cursor-pointer bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06] overflow-hidden transition active:scale-[0.98] active:opacity-90 ${
-                        isSelected ? 'ring-[3px] ring-ios-blue' : ''
-                      }`}
-                    >
-                      <div className="relative aspect-video bg-black/10 dark:bg-white/10 flex items-center justify-center">
-                        {playlist.thumbnail ? (
-                          <img src={playlist.thumbnail} alt={playlist.title} loading="lazy"
-                            className="w-full h-full object-cover" />
-                        ) : (
-                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-                            className="text-black/20 dark:text-white/20">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <line x1="9" y1="3" x2="9" y2="21" />
-                          </svg>
-                        )}
-                        <div className="absolute top-2 right-2">
-                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            isSelected
-                              ? 'bg-ios-blue border-ios-blue'
-                              : 'bg-white/80 dark:bg-black/50 border-white dark:border-gray-400'
-                          }`}>
-                            {isSelected && (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <h3 className="text-[15px] font-medium text-ios-text-primary dark:text-ios-text-primary-dark line-clamp-2 leading-snug">
-                          {playlist.title}
-                        </h3>
-                        <p className="mt-1 text-[12px] text-ios-text-secondary">
-                          {playlist.video_count} videos
-                        </p>
-                      </div>
+          playlistsLoading ? (
+            <EmptyState text="Loading playlists…" />
+          ) : playlistsError ? (
+            <EmptyState text={playlistsError} error />
+          ) : playlists.length === 0 ? (
+            <EmptyState text="This channel has no public playlists." />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {playlists.map((playlist, idx) => {
+                const isSelected = selectedPlaylistIds.has(playlist.id)
+                return (
+                  <motion.div
+                    key={playlist.id}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: Math.min(idx * 0.02, 0.3) }}
+                    onClick={() => togglePlaylist(playlist.id)}
+                    className={`group cursor-pointer rounded-2xl bg-white dark:bg-ink-700 border overflow-hidden transition-all hover:-translate-y-0.5 ${
+                      isSelected ? 'border-ink-900 dark:border-cream shadow-soft' : 'border-black/[0.06] dark:border-white/10 hover:border-ink-900/30 dark:hover:border-white/20'
+                    }`}
+                  >
+                    <div className="relative aspect-video bg-ink-100 dark:bg-ink-600 flex items-center justify-center">
+                      {playlist.thumbnail ? (
+                        <img src={playlist.thumbnail} alt={playlist.title} loading="lazy" className="w-full h-full object-cover" />
+                      ) : (
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink-300">
+                          <rect x="3" y="3" width="18" height="18" rx="2" />
+                          <line x1="9" y1="3" x2="9" y2="21" />
+                        </svg>
+                      )}
+                      <SelectionBadge selected={isSelected} />
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </>
+                    <div className="p-3.5">
+                      <h3 className="text-[14px] font-medium text-ink-900 dark:text-cream line-clamp-2 leading-snug">{playlist.title}</h3>
+                      <p className="mt-1 text-[12px] text-ink-400 font-mono">{playlist.video_count} videos</p>
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </div>
+          )
         )}
       </div>
 
-      {/* Sticky bottom bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-ios-card-dark/90 backdrop-blur-md shadow-[0_-0.5px_0_rgba(0,0,0,0.15)] dark:shadow-[0_-0.5px_0_rgba(255,255,255,0.15)] z-40 pb-[max(env(safe-area-inset-bottom),12px)]">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="text-[15px] text-ios-text-secondary">
-            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-              V {selectedLongCount}
-            </span>
-            <span className="mx-1">·</span>
-            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-              S {selectedShortCount}
-            </span>
-            <span className="mx-1">·</span>
-            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-              P {selectedPlaylistCount}
-            </span>
-            <span className="mx-1">·</span>
-            <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
-              T {optimisticTotal}
-            </span>
-            <span className="ml-1">total</span>
-            {saving && <span className="ml-2 text-[12px]">Saving…</span>}
-            {resolvingPlaylists && <span className="ml-2 text-[12px]">Resolving playlists…</span>}
-            {expansionError && (
-              <div className="mt-1 text-[13px] text-ios-red leading-tight">{expansionError}</div>
-            )}
+      {/* Floating action bar */}
+      <motion.div
+        initial={false}
+        animate={{ y: 0 }}
+        className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(720px,calc(100vw-2rem))]"
+      >
+        <div className="glass shadow-ring border border-black/5 dark:border-white/10 rounded-2xl px-4 py-3 flex items-center gap-4">
+          <div className="flex-1 flex items-center gap-3 min-w-0">
+            <div className="hidden sm:flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-ink-400">
+              Selected
+            </div>
+            <div className="flex items-center gap-3 text-[12px] text-ink-500 dark:text-white/60 flex-wrap">
+              <Stat label="V" value={selectedLongCount} />
+              <Stat label="S" value={selectedShortCount} />
+              <Stat label="P" value={selectedPlaylistCount} />
+              <span className="hidden sm:inline-block w-px h-3.5 bg-ink-300/50" />
+              <span className="font-mono text-ink-900 dark:text-cream font-semibold">{optimisticTotal}</span>
+              <span className="text-ink-400">total</span>
+              {saving && <span className="text-[11px] text-ink-400 italic">saving…</span>}
+            </div>
           </div>
           <button
             onClick={handleRun}
             disabled={!hasSelection || resolvingPlaylists}
-            className="px-6 h-[44px] rounded-2xl bg-ios-blue text-white font-semibold text-[15px] active:scale-[0.98] active:opacity-90 transition disabled:opacity-40 disabled:active:scale-100"
+            className="h-11 px-5 rounded-xl bg-ink-900 dark:bg-cream text-cream dark:text-ink-900 font-medium text-[14px] hover:bg-ink-700 dark:hover:bg-white transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {resolvingPlaylists ? 'Resolving playlists…' : 'Run pipeline'}
+            {resolvingPlaylists ? (
+              <>
+                <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+                Resolving
+              </>
+            ) : (
+              <>
+                Run pipeline
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                </svg>
+              </>
+            )}
           </button>
         </div>
         {(selectedIds.size > MAX_SELECTION || optimisticTotal > MAX_SELECTION) && (
-          <div className="max-w-5xl mx-auto px-4 pb-2">
-            <p className="text-[13px] text-ios-yellow">
-              {MAX_SELECTION}+ videos selected — pipeline may be slow and expensive
-            </p>
-          </div>
+          <p className="mt-2 text-center text-[12px] text-ios-yellow">
+            {MAX_SELECTION}+ videos selected — pipeline may be slow and expensive
+          </p>
+        )}
+        {expansionError && (
+          <p className="mt-2 text-center text-[12px] text-ios-red">{expansionError}</p>
+        )}
+      </motion.div>
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="text-[10px] font-mono uppercase text-ink-400">{label}</span>
+      <span className="font-mono text-ink-900 dark:text-cream font-semibold">{value}</span>
+    </span>
+  )
+}
+
+function EmptyState({ text, error }: { text: string; error?: boolean }) {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <p className={`text-[14px] ${error ? 'text-ios-red' : 'text-ink-400'}`}>{text}</p>
+    </div>
+  )
+}
+
+function SelectionBadge({ selected }: { selected: boolean }) {
+  return (
+    <div className="absolute top-2.5 right-2.5">
+      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+        selected ? 'bg-ink-900 dark:bg-cream border-ink-900 dark:border-cream scale-100' : 'bg-white/80 dark:bg-ink-900/50 border-white dark:border-ink-300 backdrop-blur-sm scale-90'
+      }`}>
+        {selected && (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-cream dark:text-ink-900">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
         )}
       </div>
+    </div>
+  )
+}
+
+function VideoGrid({
+  videos, aspect, cols, selectedIds, onToggle, formatDuration,
+}: {
+  videos: Video[]
+  aspect: string
+  cols: string
+  selectedIds: Set<string>
+  onToggle: (id: string) => void
+  formatDuration: (s: number) => string
+}) {
+  return (
+    <div className={`grid ${cols} gap-4`}>
+      {videos.map((video, idx) => {
+        const isSelected = selectedIds.has(video.id)
+        return (
+          <motion.div
+            key={video.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: Math.min(idx * 0.012, 0.3) }}
+            onClick={() => onToggle(video.id)}
+            className={`group cursor-pointer rounded-2xl bg-white dark:bg-ink-700 border overflow-hidden transition-all hover:-translate-y-0.5 ${
+              isSelected ? 'border-ink-900 dark:border-cream shadow-soft' : 'border-black/[0.06] dark:border-white/10 hover:border-ink-900/30 dark:hover:border-white/20'
+            }`}
+          >
+            <div className={`relative ${aspect} bg-ink-100 dark:bg-ink-600`}>
+              <img src={video.thumbnail} alt={video.title} loading="lazy" className="w-full h-full object-cover" />
+              <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/75 text-white text-[11px] font-mono">
+                {formatDuration(video.duration)}
+              </div>
+              <SelectionBadge selected={isSelected} />
+            </div>
+            <div className="p-3.5">
+              <h3 className="text-[14px] font-medium text-ink-900 dark:text-cream line-clamp-2 leading-snug">{video.title}</h3>
+              <p className="mt-1 text-[12px] text-ink-400">{formatRelativeDate(video.upload_date)}</p>
+            </div>
+          </motion.div>
+        )
+      })}
     </div>
   )
 }

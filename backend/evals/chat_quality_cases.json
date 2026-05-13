@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "description": "Starter deterministic chat-quality cases. These use mock frames for dry-run mode; replace channel_id and sources with real local channel data for context/live runs.",
+  "templates": {
+    "specific_supported": {
+      "expected_video_ids": ["video_id"],
+      "expected_terms": ["topic", "specific phrase"],
+      "requires_citation": true,
+      "expect_refusal": false
+    },
+    "unsupported_refusal": {
+      "expected_video_ids": [],
+      "expected_terms": ["not enough caption evidence"],
+      "requires_citation": false,
+      "expect_refusal": true
+    }
+  },
+  "cases": [
+    {
+      "id": "mock_brand_values_supported",
+      "channel_id": "UC_mock_brand",
+      "question": "What does he say a brand should promise?",
+      "expected_video_ids": ["brand_vid_001"],
+      "expected_terms": ["brand", "promise", "values"],
+      "requires_citation": true,
+      "expect_refusal": false,
+      "notes": "Starter specific-answer case with a source-registry frame and one valid [S1] citation.",
+      "mock_frames": [
+        {
+          "type": "sources",
+          "sources": [
+            {
+              "source_id": "S1",
+              "kind": "chunk",
+              "chunk_id": "brand_vid_001:0003",
+              "video_id": "brand_vid_001",
+              "title": "Brand Strategy Basics",
+              "upload_date": "20240115",
+              "start_seconds": 142,
+              "end_seconds": 205,
+              "quote": "A brand is a promise backed by repeated values and consistent behavior.",
+              "text": "A brand is a promise backed by repeated values and consistent behavior. If the audience cannot predict the value, the promise is not real yet."
+            }
+          ]
+        },
+        {
+          "type": "delta",
+          "text": "He frames a brand as a promise that has to be backed by repeated values and consistent behavior [S1]."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "id": "mock_retention_terms_supported",
+      "channel_id": "UC_mock_growth",
+      "question": "How does he explain retention loops?",
+      "expected_video_ids": ["growth_vid_010"],
+      "expected_terms": ["retention", "feedback loop", "repeat"],
+      "requires_citation": true,
+      "expect_refusal": false,
+      "notes": "Uses two sources and ensures source recall only requires at least one expected cited video.",
+      "mock_frames": [
+        {
+          "type": "sources",
+          "sources": [
+            {
+              "source_id": "S1",
+              "kind": "chunk",
+              "chunk_id": "growth_vid_010:0001",
+              "video_id": "growth_vid_010",
+              "title": "Audience Retention",
+              "upload_date": "20240220",
+              "start_seconds": 61,
+              "end_seconds": 118,
+              "quote": "Retention is a feedback loop: deliver a useful moment, then give people a reason to repeat the behavior.",
+              "text": "Retention is a feedback loop: deliver a useful moment, then give people a reason to repeat the behavior. The repeat action matters more than a one-time spike."
+            },
+            {
+              "source_id": "S2",
+              "kind": "chunk",
+              "chunk_id": "growth_vid_011:0002",
+              "video_id": "growth_vid_011",
+              "title": "Growth Notes",
+              "upload_date": "20240305",
+              "start_seconds": 210,
+              "end_seconds": 260,
+              "quote": "A reminder or next step can turn attention into a second session.",
+              "text": "A reminder or next step can turn attention into a second session. That second session is the earliest sign the loop is working."
+            }
+          ]
+        },
+        {
+          "type": "delta",
+          "text": "He describes retention as a feedback loop where a useful moment creates a reason to repeat the behavior [S1]."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "id": "mock_unsupported_refusal",
+      "channel_id": "UC_mock_brand",
+      "question": "What does he say about quantum pricing rituals?",
+      "expected_video_ids": [],
+      "expected_terms": ["not enough caption evidence"],
+      "requires_citation": false,
+      "expect_refusal": true,
+      "notes": "Unsupported question should produce an evidence refusal instead of invented claims.",
+      "mock_frames": [
+        {
+          "type": "sources",
+          "sources": []
+        },
+        {
+          "type": "delta",
+          "text": "There is not enough caption evidence in the source pack to answer that."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "id": "mock_sse_registry_shape",
+      "channel_id": "UC_mock_ops",
+      "question": "What operating principle does he give for launches?",
+      "expected_video_ids": ["ops_vid_003"],
+      "expected_terms": ["launch", "checklist", "rollback"],
+      "requires_citation": true,
+      "expect_refusal": false,
+      "notes": "Exercises backend source-registry frame shape and [S1]-style citation parsing.",
+      "mock_frames": [
+        "data: {\"type\":\"sources\",\"sources\":[{\"source_id\":\"S1\",\"kind\":\"chunk\",\"chunk_id\":\"ops_vid_003:0004\",\"video_id\":\"ops_vid_003\",\"title\":\"Launch Operations\",\"upload_date\":\"20240510\",\"start_seconds\":315,\"end_seconds\":372,\"quote\":\"Every launch needs a checklist and a rollback path before traffic arrives.\",\"text\":\"Every launch needs a checklist and a rollback path before traffic arrives. The checklist keeps the team calm and the rollback path keeps the blast radius small.\"}]}\n\n",
+        "data: {\"type\":\"delta\",\"text\":\"For launches, he wants a checklist plus a rollback path ready before traffic arrives [S1].\"}\n\n",
+        "data: {\"type\":\"done\"}\n\n"
+      ]
+    }
+  ]
+}

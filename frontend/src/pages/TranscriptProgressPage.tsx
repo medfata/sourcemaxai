@@ -67,6 +67,9 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([])
   const lastStatusRef = useRef<Record<string, string>>({})
   const [videoListOpen, setVideoListOpen] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const [controlError, setControlError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -119,6 +122,8 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
   const failedCount = videos.filter((v) => v.status === 'failed').length
   const unavailableCount = videos.filter((v) => v.status === 'unavailable').length
   const progress = total > 0 ? (completed / total) * 100 : 0
+  const runId = typeof state?.run_id === 'string' ? state.run_id : null
+  const canRetryFailed = state?.status === 'failed' && failedCount > 0 && Boolean(runId) && !notice
 
   const activeItems: ActivityItem[] = useMemo(() =>
     videos
@@ -148,12 +153,25 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
   }, [onComplete])
 
   const handleCancel = async () => {
-    await fetch('/api/pipeline/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: channel.channel_id }),
-    })
+    await api.pipelineCancel(channel.channel_id)
     onBack()
+  }
+
+  const handleRetryFailed = async () => {
+    if (!runId) {
+      setControlError('No retryable run found')
+      return
+    }
+    setRetrying(true)
+    setControlError(null)
+    setNotice(null)
+    const res = await api.retryFailed(runId)
+    setRetrying(false)
+    if (!res.ok || !res.data) {
+      setControlError(res.error || 'Retry failed')
+      return
+    }
+    setNotice(`Retrying ${res.data.retried} failed video${res.data.retried === 1 ? '' : 's'}`)
   }
 
   useEffect(() => {
@@ -165,14 +183,17 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
 
   if (!initialized) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
-        <div className="text-ios-text-secondary text-[17px]">Loading…</div>
+      <div className="flex items-center justify-center min-h-[100svh] bg-cream dark:bg-ink-900">
+        <div className="flex items-center gap-3 text-ink-400">
+          <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+          <span className="text-[14px]">Loading</span>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="pb-24">
+    <div className="min-h-[100svh] bg-cream dark:bg-ink-900 pb-32">
       <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -195,6 +216,23 @@ export default function TranscriptProgressPage({ channel, onComplete, onBack }: 
             Cancel
           </button>
         </div>
+
+        {(controlError || notice || canRetryFailed) && (
+          <div className="mb-4 px-4 py-3 bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06]">
+            {controlError && <p className="text-[13px] text-ios-red mb-3">{controlError}</p>}
+            {notice && <p className="text-[13px] text-ios-green mb-3">{notice}</p>}
+            {canRetryFailed && (
+              <button
+                onClick={handleRetryFailed}
+                disabled={retrying}
+                className="inline-flex items-center gap-2 px-5 h-[36px] rounded-xl bg-ios-blue text-white font-semibold text-[14px] active:scale-[0.98] disabled:opacity-50 transition"
+              >
+                {retrying && <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />}
+                Retry failed videos
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Stats strip */}
         <ProgressStats

@@ -36,28 +36,31 @@ export default function EvidenceSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-stretch sm:justify-end bg-black/50 backdrop-blur-sm">
       <div
         data-sheet-content
-        className="relative w-full max-w-lg bg-white dark:bg-ios-card-dark rounded-t-3xl shadow-xl p-4 transform transition-transform duration-300 ease-out translate-y-0"
+        className="relative w-full max-w-lg sm:w-[440px] sm:max-w-[440px] sm:h-full bg-white dark:bg-ios-card-dark rounded-t-3xl sm:rounded-t-none sm:rounded-l-3xl shadow-xl p-4 transform transition-transform duration-300 ease-out translate-y-0 sm:translate-x-0 flex flex-col"
       >
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-semibold text-ios-text-primary">
+        <div className="flex justify-between items-start mb-4 flex-shrink-0">
+          <h3 className="text-lg font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
             Evidence
           </h3>
           <button
             onClick={onClose}
-            className="text-ios-text-secondary hover:text-ios-blue"
+            className="h-8 w-8 rounded-full bg-black/[0.04] dark:bg-white/[0.08] text-ios-text-secondary hover:text-ios-blue flex items-center justify-center"
+            aria-label="Close evidence"
           >
             ×
           </button>
         </div>
-        <EvidencePane
-          focusedRef={focusedRef}
-          conversationRefs={conversationRefs}
-          onSelectRef={onSelectRef}
-          channelName={channelName}
-        />
+        <div className="min-h-0 flex-1">
+          <EvidencePane
+            focusedRef={focusedRef}
+            conversationRefs={conversationRefs}
+            onSelectRef={onSelectRef}
+            channelName={channelName}
+          />
+        </div>
       </div>
     </div>
   );

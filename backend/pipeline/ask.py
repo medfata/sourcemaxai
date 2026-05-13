@@ -1,64 +1,87 @@
-"""Chat against an aggregated channel profile via streaming LLM."""
+"""Chat against a channel profile via retrieval-backed streaming LLM."""
 
 import json
 import os
+import re
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from backend.models import ApiResponse, ChatScope
-from backend.storage import get_channel_dir, read_json
+from backend.models import ChatScope
+from backend.pipeline.chat_context import build_chat_context
+from backend.quotas import estimate_summary_cost_usd, get_quota_store
+from backend.storage import current_owner_id, get_channel_dir, load_profile, read_json
 
-CHAT_SYSTEM_PROMPT_TEMPLATE = """You are analyzing a YouTube channel based on structured summaries of its videos.
-The summaries are listed chronologically (oldest first), so you can identify
-how the creator's thinking, topics, and tone have evolved.
+CHAT_MODEL = "MiniMax-M2.7-highspeed"
 
-Data shape:
-- Each summary has a video_id.
-- key_claims and notable_opinions are objects with text and evidence[].
-- Each evidence entry has start_seconds (an int) and quote (a verbatim substring).
+CITATION_MARKER_RE = re.compile(r"\[(S\d+)\]")
 
-CITATIONS — read carefully:
-- When a claim in your answer maps to an evidence entry, append a COMPACT citation marker after the relevant clause. The marker is a markdown link whose visible text is ONLY the timestamp.
-- Format: [↗ M:SS](https://youtu.be/<video_id>?t=<start_seconds>s)
-  - Convert start_seconds to M:SS or H:MM:SS (e.g., 142 → 2:22, 3725 → 1:02:05).
-  - The arrow glyph "↗" is required so the frontend can style the marker as a citation pill.
-- NEVER wrap the claim text itself in a markdown link. The link text is ALWAYS just "↗ M:SS" — never a sentence, phrase, or quote.
-- Multiple supporting moments → multiple markers in sequence:
-  "Naval argues fortunes require leverage. [↗ 2:22](https://youtu.be/abc?t=142s) [↗ 14:05](https://youtu.be/def?t=845s)"
-- If a statement is your synthesis across many videos with no single supporting evidence entry, do not cite. Say "across the channel" or omit the marker.
 
-FORMATTING:
-- For straightforward questions: tight prose, lead with the answer.
-- When asked to reconstruct a framework, model, system, or interlocking set of concepts (e.g., "explain X's framework", "how does X work"):
-  - Use ## headers for each top-level component.
-  - Under each header, write 1–3 short paragraphs of dense prose with citation markers after supported claims.
-  - Optionally end with a brief synthesis paragraph (no header, or "## How it fits together").
-  - Use **bold** sparingly for genuinely load-bearing terms.
-  - Do NOT draw ASCII diagrams, boxes, or arrow flowcharts. The renderer is a chat bubble, not a code block.
-- Cut filler: no preambles ("Great question"), no recaps of the question, no closing summaries that restate what you just said.
-- Use bullets/numbered lists only when content is genuinely enumerable (3+ parallel items) — never to pad a single point.
-- Distinguish recurring patterns from one-off claims when it matters.
-- Don't drop substantive findings to be brief — concise means dense, not shallow.
-- If asked about something not covered in the summaries, say so in one sentence.
+def _compact_source_value(value: Any) -> str:
+    return " ".join(str(value or "").split())
 
-CHANNEL: {channel_name}
-VIDEOS: {video_count} (from {first_date} to {last_date})
 
-ARTIFACTS — when to emit a chart instead of prose:
-- If the question asks about evolution over time of a topic, theme, or stance → emit an `evolution` artifact.
-- If the question asks for a side-by-side comparison of two periods/topics → emit a `comparison_table`.
-- If the question asks for "top claims", "all claims about X", or to enumerate beliefs → emit a `claim_cluster`.
-- Format: a fenced block with language `chart`, body is JSON. Place the artifact after a 1-2 sentence intro paragraph. Do not repeat the artifact's content as prose.
-- Schemas:
-  evolution:        { type:"evolution", title:string, theme:string, points:[{video_id, upload_date, score(-1..1), label}] }
-  comparison_table: { type:"comparison_table", title:string, columns:[string], rows:[[string]] }
-  claim_cluster:    { type:"claim_cluster", title:string, groups:[{label:string, claims:[{text, video_id, start_seconds}]}] }
-- Score in evolution is a stance scalar from -1 (strongly against) to +1 (strongly for). Use 0 for neutral/mixed.
-- Only emit an artifact when the question naturally calls for one. For straightforward Q&A, plain prose with citations is correct.
+def _coerce_seconds(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return max(int(value), 0)
+    if isinstance(value, str):
+        try:
+            return max(int(float(value)), 0)
+        except ValueError:
+            return None
+    return None
 
-SUMMARIES (chronological):
-{serialized_summaries}
-"""
+
+def build_source_registry(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return client-safe citation metadata for retrieved sources."""
+    registry = []
+    for index, source in enumerate(sources, start=1):
+        source_id = _compact_source_value(source.get("source_id")) or f"S{index}"
+        video_id = _compact_source_value(source.get("video_id"))
+        start_seconds = _coerce_seconds(source.get("start_seconds"))
+        if not source_id or not video_id or start_seconds is None:
+            continue
+
+        entry: dict[str, Any] = {
+            "source_id": source_id,
+            "kind": _compact_source_value(source.get("kind")) or "chunk",
+            "video_id": video_id,
+            "title": _compact_source_value(source.get("title")),
+            "upload_date": _compact_source_value(source.get("upload_date")),
+            "start_seconds": start_seconds,
+            "quote": _compact_source_value(source.get("quote")),
+        }
+
+        end_seconds = _coerce_seconds(source.get("end_seconds"))
+        if end_seconds is not None:
+            entry["end_seconds"] = end_seconds
+
+        chunk_id = _compact_source_value(source.get("chunk_id"))
+        if chunk_id:
+            entry["chunk_id"] = chunk_id
+
+        registry.append(entry)
+    return registry
+
+
+def unknown_citation_ids(answer_text: str, registry: list[dict[str, Any]]) -> list[str]:
+    """Return cited source IDs that were not included in the backend registry."""
+    known_ids = {
+        source["source_id"]
+        for source in registry
+        if isinstance(source.get("source_id"), str)
+    }
+    unknown = sorted(
+        {
+            match.group(1)
+            for match in CITATION_MARKER_RE.finditer(answer_text)
+            if match.group(1) not in known_ids
+        },
+        key=lambda source_id: int(source_id[1:]),
+    )
+    return unknown
 
 
 def filter_videos(videos: list[dict], scope: ChatScope | None) -> list[dict]:
@@ -80,41 +103,11 @@ def filter_videos(videos: list[dict], scope: ChatScope | None) -> list[dict]:
 
 
 def build_system_prompt(channel_id: str, scope: ChatScope | None = None) -> str | None:
-    """Load profile.json and build the system prompt. Returns None if profile missing."""
-    channel_dir = get_channel_dir(channel_id)
-    profile = read_json(channel_dir / "profile.json")
-    if not profile:
+    """Build the compact chat system prompt. Returns None if profile missing."""
+    context = build_chat_context(channel_id, [], scope)
+    if context.error:
         return None
-
-    channel_name = profile.get("channel_name", "Unknown")
-    date_range = profile.get("date_range", {})
-    first_date = date_range.get("first", "unknown")
-    last_date = date_range.get("last", "unknown")
-    videos = profile.get("videos", [])
-    filtered_videos = filter_videos(videos, scope)
-    video_count = len(filtered_videos)
-    serialized_summaries = json.dumps(filtered_videos, separators=(",", ":"))
-
-    scope_line = ""
-    if scope and (scope.themes or scope.tones or scope.date_from or scope.date_to):
-        parts = []
-        if scope.themes:
-            parts.append(f"themes={', '.join(scope.themes)}")
-        if scope.tones:
-            parts.append(f"tones={', '.join(scope.tones)}")
-        if scope.date_from or scope.date_to:
-            from_part = scope.date_from or "beginning"
-            to_part = scope.date_to or "end"
-            parts.append(f"dates={from_part}..{to_part}")
-        scope_line = f"\n\nSCOPE: restricted to {video_count} of {len(videos)} videos matching: {', '.join(parts)}. Do not reference videos outside this set."
-
-    return CHAT_SYSTEM_PROMPT_TEMPLATE.format(
-        channel_name=channel_name,
-        video_count=video_count,
-        first_date=first_date,
-        last_date=last_date,
-        serialized_summaries=serialized_summaries,
-    ) + scope_line
+    return context.system_prompt
 
 
 async def chat_stream(channel_id: str, messages: list[dict], scope: ChatScope | None = None):
@@ -122,8 +115,10 @@ async def chat_stream(channel_id: str, messages: list[dict], scope: ChatScope | 
     if scope and not scope.themes and not scope.tones and not scope.date_from and not scope.date_to:
         scope = None
 
-    channel_dir = get_channel_dir(channel_id)
-    profile = read_json(channel_dir / "profile.json")
+    profile = load_profile(channel_id)
+    if not profile:
+        channel_dir = get_channel_dir(channel_id)
+        profile = read_json(channel_dir / "profile.json")
     if not profile:
         yield json.dumps({"type": "error", "message": "profile_not_found"})
         return
@@ -133,10 +128,12 @@ async def chat_stream(channel_id: str, messages: list[dict], scope: ChatScope | 
         yield json.dumps({"type": "error", "message": "scope_empty"})
         return
 
-    system = build_system_prompt(channel_id, scope)
-    if system is None:
-        yield json.dumps({"type": "error", "message": "profile_not_found"})
+    context = build_chat_context(channel_id, messages, scope)
+    if context.error:
+        yield json.dumps({"type": "error", "message": context.error})
         return
+
+    source_registry = build_source_registry(context.sources)
 
     api_key = os.environ.get("MINIMAX_API_KEY")
     if not api_key:
@@ -150,23 +147,61 @@ async def chat_stream(channel_id: str, messages: list[dict], scope: ChatScope | 
         base_url=MINIMAX_BASE_URL,
     )
 
+    yield json.dumps({"type": "sources", "sources": source_registry})
+
+    answer_parts: list[str] = []
+    final_usage: Any = None
     try:
         async with client.messages.stream(
-            model="MiniMax-M2.7-highspeed",
+            model=CHAT_MODEL,
             max_tokens=4000,
-            system=system,
-            messages=messages,
+            system=context.system_prompt,
+            messages=context.messages,
         ) as stream:
             async for event in stream:
                 if event.type == "content_block_delta":
                     delta = event.delta
                     if hasattr(delta, "text") and delta.text:
+                        answer_parts.append(delta.text)
                         yield json.dumps({"type": "delta", "text": delta.text})
                     elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
                         # Drop reasoning_content deltas — do NOT leak to client
                         continue
+            try:
+                final_message = await stream.get_final_message()
+                final_usage = getattr(final_message, "usage", None)
+            except Exception:  # pragma: no cover - SDK quirk
+                final_usage = None
     except Exception as exc:
         yield json.dumps({"type": "error", "message": str(exc)})
         return
 
+    _record_chat_usage(final_usage)
+
+    unknown_ids = unknown_citation_ids("".join(answer_parts), source_registry)
+    if unknown_ids:
+        yield json.dumps({"type": "citation_warning", "unknown_source_ids": unknown_ids})
+
     yield json.dumps({"type": "done"})
+
+
+def _record_chat_usage(usage: Any) -> None:
+    """Best-effort usage_events insert for the active chat caller."""
+    owner_id = current_owner_id()
+    if not owner_id:
+        return
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+    cost = estimate_summary_cost_usd(input_tokens, output_tokens)
+    try:
+        get_quota_store().record_usage(
+            owner_id,
+            event_type="chat",
+            model=CHAT_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            chat_messages=1,
+            cost_usd=cost,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[chat] usage record failed: {exc}")

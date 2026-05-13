@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { ChannelMeta } from '../types'
+import type { ChannelMeta, PipelineCost } from '../types'
 import { useSSE } from '../hooks/useSSE'
 import ProgressStats from '../components/ProgressStats'
 import LiveActivityPanel from '../components/LiveActivityPanel'
@@ -19,12 +19,6 @@ interface VideoRow {
   title: string
   thumbnail: string
   status: VideoStatus
-}
-
-interface CostEstimate {
-  estimated_cost_usd: number
-  video_count: number
-  total_input_tokens: number
 }
 
 function StatusPill({ status }: { status: VideoStatus }) {
@@ -62,10 +56,13 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
   const { state } = useSSE(channel.channel_id)
   const [baseVideos, setBaseVideos] = useState<VideoRow[]>([])
   const [initialized, setInitialized] = useState(false)
-  const [cost, setCost] = useState<CostEstimate | null>(null)
+  const [cost, setCost] = useState<PipelineCost | null>(null)
   const [activityLog, setActivityLog] = useState<ActivityItem[]>([])
   const lastStatusRef = useRef<Record<string, string>>({})
   const [videoListOpen, setVideoListOpen] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const [controlError, setControlError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -122,6 +119,8 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
   const doneCount = videos.filter((v) => v.status === 'done').length
   const failedCount = videos.filter((v) => v.status === 'failed').length
   const progress = total > 0 ? (completed / total) * 100 : 0
+  const runId = typeof state?.run_id === 'string' ? state.run_id : null
+  const canRetryFailed = state?.status === 'failed' && failedCount > 0 && Boolean(runId) && !notice
 
   const activeItems: ActivityItem[] = useMemo(() =>
     videos
@@ -151,40 +150,61 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
   }, [onComplete])
 
   const handleCancel = async () => {
-    await fetch('/api/pipeline/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: channel.channel_id }),
-    })
+    await api.pipelineCancel(channel.channel_id)
     onBack()
   }
 
-  const handleStartSummaries = async () => {
-    await fetch('/api/pipeline/resume', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: channel.channel_id }),
-    })
+  const handleRetryFailed = async () => {
+    if (!runId) {
+      setControlError('No retryable run found')
+      return
+    }
+    setRetrying(true)
+    setControlError(null)
+    setNotice(null)
+    const res = await api.retryFailed(runId)
+    setRetrying(false)
+    if (!res.ok || !res.data) {
+      setControlError(res.error || 'Retry failed')
+      return
+    }
+    setNotice(`Retrying ${res.data.retried} failed video${res.data.retried === 1 ? '' : 's'}`)
   }
+
+  const handleStartSummaries = async () => {
+    setControlError(null)
+    const res = await api.pipelineResume(channel.channel_id)
+    if (!res.ok) {
+      setControlError(res.error || 'Could not start summaries')
+    }
+  }
+
+  const estimatedTranscriptMinutes = cost
+    ? Math.ceil((cost.estimated_transcript_seconds || 0) / 60)
+    : 0
+
+  const summaryStatus = state?.stages?.summaries?.status
 
   useEffect(() => {
     if (!initialized) return
-    const summaryStage = state?.stages?.summaries
-    if (summaryStage?.status === 'done' || state?.status === 'completed' || state?.status === 'failed') {
+    if (summaryStatus === 'done' || state?.status === 'completed' || state?.status === 'failed') {
       handleComplete()
     }
-  }, [state?.stages?.summaries?.status, state?.status, initialized, handleComplete])
+  }, [summaryStatus, state?.status, initialized, handleComplete])
 
   if (!initialized) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100svh-64px)]">
-        <div className="text-ios-text-secondary text-[17px]">Loading…</div>
+      <div className="flex items-center justify-center min-h-[100svh] bg-cream dark:bg-ink-900">
+        <div className="flex items-center gap-3 text-ink-400">
+          <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+          <span className="text-[14px]">Loading</span>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="pb-24">
+    <div className="min-h-[100svh] bg-cream dark:bg-ink-900 pb-32">
       <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -208,6 +228,23 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
           </button>
         </div>
 
+        {(controlError || notice || canRetryFailed) && (
+          <div className="mb-4 px-4 py-3 bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06]">
+            {controlError && <p className="text-[13px] text-ios-red mb-3">{controlError}</p>}
+            {notice && <p className="text-[13px] text-ios-green mb-3">{notice}</p>}
+            {canRetryFailed && (
+              <button
+                onClick={handleRetryFailed}
+                disabled={retrying}
+                className="inline-flex items-center gap-2 px-5 h-[36px] rounded-xl bg-ios-blue text-white font-semibold text-[14px] active:scale-[0.98] disabled:opacity-50 transition"
+              >
+                {retrying && <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />}
+                Retry failed videos
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Cost estimate + confirmation */}
         {cost && state?.status === 'awaiting_confirm_summaries' && (
           <div className="mb-4 px-4 py-3 bg-white dark:bg-ios-card-dark rounded-xl border border-black/[0.04] dark:border-white/[0.06]">
@@ -216,7 +253,8 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
               <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
                 ~${cost.estimated_cost_usd.toFixed(2)}
               </span>{' '}
-              for {cost.video_count} videos ({cost.total_input_tokens.toLocaleString()} input tokens)
+              for {estimatedTranscriptMinutes.toLocaleString()} transcript minutes
+              across {cost.video_count} videos
             </p>
             <div className="flex items-center gap-3">
               <button
@@ -243,7 +281,8 @@ export default function SummaryProgressPage({ channel, onComplete, onBack }: Sum
               <span className="font-semibold text-ios-text-primary dark:text-ios-text-primary-dark">
                 ~${cost.estimated_cost_usd.toFixed(2)}
               </span>{' '}
-              for {cost.video_count} videos ({cost.total_input_tokens.toLocaleString()} input tokens)
+              for {estimatedTranscriptMinutes.toLocaleString()} transcript minutes
+              across {cost.video_count} videos
             </p>
           </div>
         )}

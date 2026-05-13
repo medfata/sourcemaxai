@@ -1,11 +1,66 @@
-data/
-__pycache__/
-*.pyc
-*.pyo
+# Environment and secrets
 .env
-node_modules/
-dist/
-.DS_Store
-*.log
+.env.*
+!.env.example
+!**/.env.example
+deploy/*.env
+!deploy/*.env.example
+.dev.vars
+
+# Local deployment tooling
+.railway/
+.wrangler/
+.vercel/
+.netlify/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+**/.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 *.egg-info/
+.venv/
+venv/
+env/
+
+# Node / Vite
+node_modules/
+**/node_modules/
+packages/
+**/packages/
+dist/
+build/
+.vite/
+.cache/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local app data and generated files
+data/
+supabase/.temp/
+landing_page_mock/
+studio_page_mock/
+waitlist_mock/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
 *.err
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

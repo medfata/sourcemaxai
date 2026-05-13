@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import type { ProfileVideo } from '../types';
+import type { ChatSource, ProfileVideo } from '../types';
 
 interface CitedRef {
+  sourceId?: string;
   videoId: string;
   startSeconds: number;
   messageIdx: number;
   profileVideo?: ProfileVideo;
   evidenceQuote?: string;
+  title?: string;
+  uploadDate?: string;
+  source?: ChatSource;
 }
 
 interface Props {
@@ -23,34 +27,44 @@ export default function EvidencePane({
   channelName: _channelName,
 }: Props) {
   const [tab, setTab] = useState<'sources' | 'videos'>('sources');
+  const titleForRef = (ref: CitedRef) => ref.profileVideo?.title ?? ref.title ?? ref.source?.title ?? 'Unknown video';
+  const dateForRef = (ref: CitedRef) => ref.profileVideo?.upload_date ?? ref.uploadDate ?? ref.source?.upload_date ?? '';
+  const quoteForRef = (ref: CitedRef) => ref.evidenceQuote ?? ref.source?.quote;
+  const labelForRef = (ref: CitedRef) =>
+    ref.sourceId
+      ? `[${ref.sourceId}] ${Math.floor(ref.startSeconds / 60)}:${String(ref.startSeconds % 60).padStart(2, '0')}`
+      : `[↗ ${Math.floor(ref.startSeconds / 60)}:${String(ref.startSeconds % 60).padStart(2, '0')}]`;
 
   if (conversationRefs.length === 0) {
     return (
-      <div className="p-4 text-center text-ios-text-secondary">
-        Citations will appear here as the assistant answers.
+      <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+        <span className="text-[11px] font-mono uppercase tracking-[0.22em] text-ink-300 dark:text-white/30 mb-3">Evidence</span>
+        <p className="font-display text-[22px] tracking-tight text-ink-700 dark:text-white/70 leading-tight max-w-[240px]">
+          Citations will appear here as answers stream in.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full border-l border-ios-separator/60 bg-white dark:bg-ios-card-dark">
-      <div className="flex border-b border-ios-separator/60">
+    <div className="flex flex-col h-full">
+      <div className="flex border-b border-black/[0.06] dark:border-white/10 px-2 pt-2 gap-1">
         <button
           onClick={() => setTab('sources')}
-          className={`flex-1 px-3 py-2 text-sm font-medium ${
+          className={`relative flex-1 px-3 py-2.5 text-[13px] font-medium rounded-xl transition-colors ${
             tab === 'sources'
-              ? 'text-ios-text-primary border-b-2 border-ios-blue'
-              : 'text-ios-text-secondary hover:text-ios-text-primary'
+              ? 'text-ink-900 dark:text-cream bg-ink-100 dark:bg-white/[0.06]'
+              : 'text-ink-400 hover:text-ink-700 dark:hover:text-white/70'
           }`}
         >
           Sources
         </button>
         <button
           onClick={() => setTab('videos')}
-          className={`flex-1 px-3 py-2 text-sm font-medium ${
+          className={`relative flex-1 px-3 py-2.5 text-[13px] font-medium rounded-xl transition-colors ${
             tab === 'videos'
-              ? 'text-ios-text-primary border-b-2 border-ios-blue'
-              : 'text-ios-text-secondary hover:text-ios-text-primary'
+              ? 'text-ink-900 dark:text-cream bg-ink-100 dark:bg-white/[0.06]'
+              : 'text-ink-400 hover:text-ink-700 dark:hover:text-white/70'
           }`}
         >
           Videos cited
@@ -62,128 +76,103 @@ export default function EvidencePane({
           {focusedRef ? (
             <>
               <div className="aspect-video w-full mb-4">
-                {focusedRef.profileVideo ? (
-                  <iframe
-                    key={`${focusedRef.videoId}-${focusedRef.startSeconds}`}
-                    title="YouTube video player"
-                    src={`https://www.youtube.com/embed/${focusedRef.videoId}?start=${focusedRef.startSeconds}&autoplay=1&rel=0`}
-                    allowFullScreen
-                    className="w-full h-full rounded-xl"
-                  />
-                ) : (
-                  <div className="w-full h-full rounded-xl bg-black/10 flex items-center justify-center text-ios-text-secondary text-sm">
-                    Video not in profile
-                  </div>
-                )}
+                <iframe
+                  key={`${focusedRef.videoId}-${focusedRef.startSeconds}`}
+                  title="YouTube video player"
+                  src={`https://www.youtube.com/embed/${focusedRef.videoId}?start=${focusedRef.startSeconds}&autoplay=1&rel=0`}
+                  allowFullScreen
+                  className="w-full h-full rounded-xl"
+                />
               </div>
 
               <div className="mb-4">
-                {focusedRef.evidenceQuote ? (
-                  <blockquote className="border-l-2 border-ios-blue/40 pl-3 italic">
-                    {focusedRef.evidenceQuote}
+                {quoteForRef(focusedRef) ? (
+                  <blockquote className="border-l-2 border-accent-red/50 pl-4 py-1 italic text-[14px] leading-relaxed text-ink-700 dark:text-white/75">
+                    {quoteForRef(focusedRef)}
                   </blockquote>
                 ) : (
-                  <p className="text-ios-text-secondary italic">
-                    No quote captured for this timestamp.
+                  <p className="text-ink-400 italic text-[13px]">
+                    No quote captured for this source.
                   </p>
                 )}
               </div>
 
               <div className="flex overflow-x-auto mb-4 space-x-2">
                 {conversationRefs
-                  .filter(
-                    (r) =>
-                      r.messageIdx === focusedRef?.messageIdx &&
-                      r.videoId === focusedRef.videoId &&
-                      r.startSeconds === focusedRef.startSeconds
-                  )
+                  .filter((r) => r.messageIdx === focusedRef?.messageIdx)
                   .map((r, idx) => (
                     <button
                       key={idx}
                       onClick={() => onSelectRef(r)}
-                      className={`text-xs px-2 py-1 rounded ${
-                        r === focusedRef
-                          ? 'bg-ios-blue text-white'
-                          : 'bg-white border border-ios-separator hover:bg-ios-blue/5'
+                      className={`text-[11px] px-2.5 py-1 rounded-full whitespace-nowrap flex-shrink-0 transition-colors ${
+                        r.messageIdx === focusedRef.messageIdx &&
+                        ((r.sourceId && r.sourceId === focusedRef.sourceId) ||
+                          (r.videoId === focusedRef.videoId &&
+                            r.startSeconds === focusedRef.startSeconds))
+                          ? 'bg-ink-900 dark:bg-cream text-cream dark:text-ink-900'
+                          : 'bg-white dark:bg-ink-700 border border-black/[0.06] dark:border-white/10 text-ink-700 dark:text-white/70 hover:border-accent-red/40'
                       }`}
                     >
-                      [↗ {Math.floor(r.startSeconds / 60)}:{String(
-                        r.startSeconds % 60
-                      ).padStart(2, '0')} — {r.profileVideo?.title ?? 'Unknown video'}]
+                      {labelForRef(r)} — {titleForRef(r)}
                     </button>
                   ))}
               </div>
 
-              <div className="border-t border-ios-separator/60 pt-4">
-                <h3 className="text-sm font-semibold mb-2">Cited videos in this conversation</h3>
-                <div className="space-y-2">
-                  {Array.from(
-                    new Map(
-                      conversationRefs
-                        .filter((r) => r.profileVideo)
-                        .map((r) => [r.videoId, r])
-                    ).values()
-                  ).map((ref, idx) => (
-                    <div
+              <div className="border-t border-black/[0.06] dark:border-white/10 pt-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-ink-300 mb-3">Cited in conversation</p>
+                <div className="space-y-1">
+                  {Array.from(new Map(conversationRefs.map((r) => [r.videoId, r])).values()).map((ref, idx) => (
+                    <button
                       key={idx}
-                      className="flex items-center space-x-2 p-2 hover:bg-ios-blue/5 rounded"
+                      className="w-full flex items-center gap-3 p-2 hover:bg-ink-100 dark:hover:bg-white/[0.04] rounded-xl text-left transition-colors"
                       onClick={() => onSelectRef(ref)}
                     >
                       <img
                         src={`https://i.ytimg.com/vi/${ref.videoId}/mqdefault.jpg`}
                         alt={ref.profileVideo?.title ?? ''}
-                        className="w-10 h-6 rounded"
+                        className="w-14 h-9 rounded-md object-cover flex-shrink-0"
                       />
-                      <div>
-                        <div className="font-medium text-ios-text-primary">
-                          {ref.profileVideo?.title ?? 'Unknown video'}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium text-ink-900 dark:text-cream truncate">
+                          {titleForRef(ref)}
                         </div>
-                        <div className="text-xs text-ios-text-secondary">
-                          {ref.profileVideo?.upload_date ?? ''}
-                        </div>
+                        <div className="text-[11px] text-ink-400 mt-0.5">{dateForRef(ref)}</div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
             </>
           ) : (
-            <p className="text-ios-text-secondary">Click a citation to view evidence</p>
+            <p className="text-ink-400 text-[13px]">Click a citation to view evidence.</p>
           )}
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-4">
-          <h3 className="text-sm font-semibold mb-4">Videos cited in this conversation</h3>
-          <div className="space-y-2">
-            {Array.from(
-              new Map(
-                conversationRefs
-                  .filter((r) => r.profileVideo)
-                  .map((r) => [r.videoId, r])
-              ).values()
-            ).map((ref, idx) => (
-              <div
-                key={idx}
-                className="flex items-center space-x-2 p-2 hover:bg-ios-blue/5 rounded"
-                onClick={() => onSelectRef(ref)}
-              >
-                <img
-                  src={`https://i.ytimg.com/vi/${ref.videoId}/mqdefault.jpg`}
-                  alt={ref.profileVideo?.title ?? ''}
-                  className="w-10 h-6 rounded"
-                />
-                <div>
-                  <div className="font-medium text-ios-text-primary">
-                    {ref.profileVideo?.title ?? 'Unknown video'}
+          <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-ink-300 mb-3">Videos cited</p>
+          <div className="space-y-1">
+            {Array.from(new Map(conversationRefs.map((r) => [r.videoId, r])).values()).map((ref, idx) => {
+              const cnt = conversationRefs.filter((r) => r.videoId === ref.videoId).length
+              return (
+                <button
+                  key={idx}
+                  className="w-full flex items-center gap-3 p-2 hover:bg-ink-100 dark:hover:bg-white/[0.04] rounded-xl text-left transition-colors"
+                  onClick={() => onSelectRef(ref)}
+                >
+                  <img
+                    src={`https://i.ytimg.com/vi/${ref.videoId}/mqdefault.jpg`}
+                    alt={ref.profileVideo?.title ?? ''}
+                    className="w-14 h-9 rounded-md object-cover flex-shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-ink-900 dark:text-cream truncate">{titleForRef(ref)}</div>
+                    <div className="text-[11px] text-ink-400 mt-0.5">
+                      {dateForRef(ref)} · <span className="font-mono">{cnt}</span> citation{cnt !== 1 ? 's' : ''}
+                    </div>
                   </div>
-                  <div className="text-xs text-ios-text-secondary">
-                    {ref.profileVideo?.upload_date ?? ''} •
-                    {conversationRefs.filter((r) => r.videoId === ref.videoId).length}
-                    citation{conversationRefs.filter((r) => r.videoId === ref.videoId).length !== 1 ? 's' : ''}
-                  </div>
-                </div>
-              </div>
-            ))}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

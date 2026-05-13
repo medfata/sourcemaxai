@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -797,19 +798,31 @@ class SupabaseStorageBackend(StorageBackend):
         body: bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> bytes:
-        request = Request(url, data=body, headers=headers or {}, method=method)
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                return response.read()
-        except HTTPError as exc:
-            response_body = exc.read().decode("utf-8", errors="replace")
-            raise SupabaseStorageError(
-                f"Supabase request failed with HTTP {exc.code}: {method} {url}",
-                status_code=exc.code,
-                body=response_body,
-            ) from exc
-        except URLError as exc:
-            raise SupabaseStorageError(f"Supabase request failed: {exc.reason}") from exc
+        attempts = max(int(os.environ.get("SUPABASE_REQUEST_RETRIES", "3")), 1)
+        base_delay = max(float(os.environ.get("SUPABASE_RETRY_DELAY_SECONDS", "0.5")), 0.0)
+        for attempt in range(1, attempts + 1):
+            request = Request(url, data=body, headers=headers or {}, method=method)
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    return response.read()
+            except HTTPError as exc:
+                response_body = exc.read().decode("utf-8", errors="replace")
+                if exc.code not in {429, 500, 502, 503, 504} or attempt >= attempts:
+                    raise SupabaseStorageError(
+                        f"Supabase request failed with HTTP {exc.code}: {method} {url}",
+                        status_code=exc.code,
+                        body=response_body,
+                    ) from exc
+            except URLError as exc:
+                if attempt >= attempts:
+                    raise SupabaseStorageError(
+                        f"Supabase request failed: {exc.reason}"
+                    ) from exc
+
+            if base_delay > 0:
+                time.sleep(base_delay * attempt)
+
+        raise SupabaseStorageError(f"Supabase request failed: {method} {url}")
 
     def _request_json(
         self,

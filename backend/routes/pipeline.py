@@ -6,9 +6,6 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
-
 from backend.auth import CurrentUser, get_current_user
 from backend.config import embedded_worker_enabled
 from backend.models import ApiResponse, RetryFailedResult
@@ -44,6 +41,8 @@ from backend.storage import (
     storage_owner,
     storage_run,
 )
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 AVG_SUMMARY_OUTPUT_TOKENS = 300
 
@@ -280,6 +279,8 @@ async def _run_pipeline(
             "claim_count",
             "supported_claim_count",
             "unsupported_claim_count",
+            "rate_limited",
+            "error",
         ):
             if key in result:
                 video_state[key] = result[key]
@@ -292,7 +293,10 @@ async def _run_pipeline(
                 for v in stage["videos"].values()
                 if v["status"] in ("done", "skipped", "unavailable", "failed")
             )
-        _write_pipeline_state(channel_id, state, owner_id=owner_id)
+        try:
+            _write_pipeline_state(channel_id, state, owner_id=owner_id)
+        except Exception as exc:
+            print(f"[pipeline] progress state write failed: {exc}")
         _broadcast(
             channel_id,
             "video_update",

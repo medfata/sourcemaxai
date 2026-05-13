@@ -1,6 +1,7 @@
 """Tests for storage adapter compatibility and configuration."""
 
 import importlib
+from urllib.error import URLError
 
 import pytest
 
@@ -196,3 +197,38 @@ def test_supabase_artifact_paths_are_phase_3_deterministic():
         backend.artifact_path("owner-id", "channel-id", "run-id", "profile")
         == "owner-id/channel-id/run-id/profile.json"
     )
+
+
+def test_supabase_request_retries_transient_url_errors(monkeypatch):
+    from backend import storage
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"ok":true}'
+
+    calls = {"count": 0}
+
+    def fake_urlopen(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise URLError("temporary ssl eof")
+        return FakeResponse()
+
+    monkeypatch.setenv("SUPABASE_REQUEST_RETRIES", "2")
+    monkeypatch.setenv("SUPABASE_RETRY_DELAY_SECONDS", "0")
+    monkeypatch.setattr(storage, "urlopen", fake_urlopen)
+    backend = storage.SupabaseStorageBackend(
+        "https://project.supabase.co",
+        "service-role-secret",
+    )
+
+    assert backend._request_json("GET", "https://project.supabase.co/rest/v1/test") == {
+        "ok": True
+    }
+    assert calls["count"] == 2

@@ -91,6 +91,11 @@ def load_runtime_config(role: str = "api") -> RuntimeConfig:
             errors.append("MINIMAX_API_KEY is required in production")
         if not cors_origins:
             errors.append("CORS_ORIGINS must include the deployed frontend origin")
+        if role == "api" and not (_env("YTDLP_COOKIES_PATH") or _env("YTDLP_COOKIES_B64")):
+            warnings.append(
+                "YTDLP_COOKIES_B64 or YTDLP_COOKIES_PATH is recommended in production; "
+                "hosted IPs may be blocked by YouTube bot checks"
+            )
 
     if role == "worker" and storage_backend != "supabase":
         warnings.append("Standalone worker has no durable queue unless STORAGE_BACKEND=supabase")

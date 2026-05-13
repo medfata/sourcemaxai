@@ -14,6 +14,10 @@ Create a Railway service from the GitHub repository. Use the repository root as 
 
 Do not set the Railway root directory to `backend`. The Dockerfile is stored under `backend/Dockerfile`, but it copies `backend/` from the repository root build context.
 
+The root `railway.json` forces Railway to use `backend/Dockerfile`. If Railway still tries Railpack, check that `railway.json` has been pushed and that the service root is the repository root.
+
+The same `railway.json` sets Railway's health check to `/api/health`. Use `/api/ready` yourself after deploy to confirm production secrets and storage settings are complete.
+
 In the API service variables, paste the values from:
 
 ```text
@@ -22,11 +26,12 @@ deploy/railway-api.env.example
 
 Important values:
 
-- `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile` tells Railway to use the backend Dockerfile.
+- `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile` is included as a dashboard fallback, but `railway.json` already points Railway at the backend Dockerfile.
 - `APP_PROCESS=api` runs FastAPI.
 - `CORS_ORIGINS` must include the Cloudflare Pages preview URL and the production frontend domain.
 - `STORAGE_BACKEND=supabase` is required for production.
 - `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, and `MINIMAX_API_KEY` are secrets.
+- `YTDLP_COOKIES_B64` is recommended for production because hosted IPs can trigger YouTube bot checks during channel/video metadata fetches.
 - Do not set a custom `PORT` variable. Railway provides `PORT`, and the container listens on it.
 
 After deploy, generate a Railway public domain for the API service and verify:
@@ -38,6 +43,27 @@ Invoke-RestMethod "$API_URL/api/ready"
 ```
 
 `/api/ready` must return `"ok": true` before the frontend is considered production-ready.
+
+### YouTube cookie setup
+
+If the deployed app returns `Sign in to confirm you're not a bot` from `yt-dlp`, provide YouTube cookies that `yt-dlp` can pass with `--cookies`. Use a dedicated account if possible, and treat the exported file as a secret.
+
+To create a cookies file that survives YouTube's browser cookie rotation:
+
+1. Open a private/incognito browser window and log into YouTube.
+2. In the same window and tab, navigate to `https://www.youtube.com/robots.txt`.
+3. Export `youtube.com` cookies in Netscape `cookies.txt` format using a trusted cookies exporter extension.
+4. Close that private/incognito window so the session is not reused in the browser.
+
+Then encode the exported file from your local machine:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("youtube-cookies.txt")) | Set-Clipboard
+```
+
+On macOS/Linux, encode with `base64 -w0 youtube-cookies.txt`.
+
+Paste the copied value into the Railway API service variable `YTDLP_COOKIES_B64`, then redeploy or restart the API service. If you provide a cookies file in the container instead, set `YTDLP_COOKIES_PATH` to that file path.
 
 ## 2. Railway Worker
 
@@ -92,3 +118,5 @@ Official references:
 - Railway Dockerfile path: https://docs.railway.com/builds/dockerfiles
 - Railway public networking and `PORT`: https://docs.railway.com/deploy/exposing-your-app
 - Railway variables: https://docs.railway.com/variables
+- yt-dlp cookies FAQ: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
+- yt-dlp YouTube cookie notes: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies

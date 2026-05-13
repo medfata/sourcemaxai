@@ -1,13 +1,82 @@
 """Fetch video listings from a YouTube channel using yt-dlp."""
 
+import base64
+import binascii
 import json
+import os
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
+
+_RUNTIME_COOKIE_FILE: Path | None = None
+_RUNTIME_COOKIE_SOURCE: str | None = None
+
+
+def _normalize_cookie_text(cookies: str) -> str:
+    normalized = cookies.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized and not normalized.endswith("\n"):
+        normalized += "\n"
+    return normalized
+
+
+def _write_runtime_cookie_file(cookies: str) -> Path:
+    global _RUNTIME_COOKIE_FILE, _RUNTIME_COOKIE_SOURCE
+
+    normalized = _normalize_cookie_text(cookies)
+    if not normalized.strip():
+        raise RuntimeError("YTDLP_COOKIES_B64 is set but does not contain any cookies")
+
+    if (
+        _RUNTIME_COOKIE_FILE
+        and _RUNTIME_COOKIE_SOURCE == normalized
+        and _RUNTIME_COOKIE_FILE.exists()
+    ):
+        return _RUNTIME_COOKIE_FILE
+
+    cookie_path = Path(tempfile.gettempdir()) / "trace-ytdlp-cookies.txt"
+    cookie_path.write_text(normalized, encoding="utf-8", newline="\n")
+    try:
+        cookie_path.chmod(0o600)
+    except OSError:
+        pass
+
+    _RUNTIME_COOKIE_FILE = cookie_path
+    _RUNTIME_COOKIE_SOURCE = normalized
+    return cookie_path
+
+
+def _ytdlp_cookie_args() -> list[str]:
+    """Return yt-dlp cookie options from deployment environment."""
+    cookies_path = os.environ.get("YTDLP_COOKIES_PATH", "").strip()
+    if cookies_path:
+        return ["--cookies", cookies_path]
+
+    cookies_b64 = "".join(os.environ.get("YTDLP_COOKIES_B64", "").split())
+    if not cookies_b64:
+        return []
+
+    try:
+        cookies = base64.b64decode(cookies_b64, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise RuntimeError(
+            "YTDLP_COOKIES_B64 must be base64-encoded UTF-8 Netscape cookies.txt content"
+        ) from exc
+
+    return ["--cookies", str(_write_runtime_cookie_file(cookies))]
 
 
 def _run_ytdlp(args: list[str]) -> str:
     """Run yt-dlp and return stdout. Raises RuntimeError on failure."""
-    cmd = ["python", "-m", "yt_dlp", "--no-warnings", "--no-check-certificates"] + args
+    cmd = [
+        "python",
+        "-m",
+        "yt_dlp",
+        "--no-warnings",
+        "--no-check-certificates",
+        *_ytdlp_cookie_args(),
+        *args,
+    ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         # yt-dlp exits non-zero for some valid operations; check if stdout is empty

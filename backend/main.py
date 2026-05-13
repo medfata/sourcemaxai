@@ -77,9 +77,9 @@ async def log_requests(request: Request, call_next):
 @app.on_event("startup")
 async def start_pipeline_worker() -> None:
     """Validate environment and optionally run the local embedded worker."""
-    config = validate_runtime_config("api")
+    config = validate_runtime_config("api", strict=False)
     if not config.ok:
-        logger.warning("runtime_config_warnings", extra={"errors": config.errors})
+        logger.error("runtime_config_errors", extra={"errors": config.errors})
     for warning in config.warnings:
         logger.warning("runtime_config_warning", extra={"warning": warning})
 

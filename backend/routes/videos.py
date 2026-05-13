@@ -31,6 +31,16 @@ from backend.storage import (
 router = APIRouter()
 
 
+def _channel_url_from_meta(channel_id: str, meta: dict) -> str:
+    channel_url = str(meta.get("channel_url") or "").strip()
+    if channel_url:
+        return channel_url
+    handle = str(meta.get("channel_handle") or "").strip()
+    if handle:
+        return f"https://www.youtube.com/@{handle.lstrip('@')}"
+    return f"https://www.youtube.com/channel/{channel_id}"
+
+
 @router.get("/api/videos")
 def get_videos(
     channel_id: str = Query(...),
@@ -43,7 +53,7 @@ def get_videos(
         return ApiResponse(ok=False, error="Channel not found")
 
     cached = load_videos(channel_id, owner_id=owner_id)
-    if cached is not None:
+    if cached:
         for v in cached:
             if "is_short" not in v:
                 duration = v.get("duration", 0) or 0
@@ -52,15 +62,8 @@ def get_videos(
             ok=True, data=VideoList(channel_id=channel_id, videos=cached)
         )
 
-    # Build canonical channel URL from meta
-    handle = meta.get("channel_handle")
-    if handle:
-        channel_url = f"https://www.youtube.com/@{handle}"
-    else:
-        channel_url = f"https://www.youtube.com/channel/{channel_id}"
-
     try:
-        videos = fetch_channel_videos(channel_url)
+        videos = fetch_channel_videos(_channel_url_from_meta(channel_id, meta))
         save_videos(channel_id, videos, owner_id=owner_id)
         return ApiResponse(
             ok=True, data=VideoList(channel_id=channel_id, videos=videos)
@@ -105,7 +108,8 @@ def get_selection(
         # Default: all videos selected
         videos = load_videos(channel_id, owner_id=owner_id) or []
         video_ids = [v["id"] for v in videos]
-        save_selection(channel_id, video_ids, owner_id=owner_id)
+        if video_ids:
+            save_selection(channel_id, video_ids, owner_id=owner_id)
 
     return ApiResponse(
         ok=True, data=Selection(channel_id=channel_id, video_ids=video_ids)
@@ -124,19 +128,13 @@ def get_playlists(
         return ApiResponse(ok=False, error="Channel not found")
 
     cached = load_playlists(channel_id, owner_id=owner_id)
-    if cached is not None:
+    if cached:
         return ApiResponse(
             ok=True, data=PlaylistList(channel_id=channel_id, playlists=cached)
         )
 
-    handle = meta.get("channel_handle")
-    if handle:
-        channel_url = f"https://www.youtube.com/@{handle}"
-    else:
-        channel_url = f"https://www.youtube.com/channel/{channel_id}"
-
     try:
-        playlists = fetch_channel_playlists(channel_url)
+        playlists = fetch_channel_playlists(_channel_url_from_meta(channel_id, meta))
         save_playlists(channel_id, playlists, owner_id=owner_id)
         return ApiResponse(
             ok=True, data=PlaylistList(channel_id=channel_id, playlists=playlists)

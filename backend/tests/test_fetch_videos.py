@@ -97,6 +97,28 @@ def test_is_short_true_for_duration_1():
     assert videos[0]["is_short"] is True
 
 
+def test_fetch_channel_videos_uses_videos_tab():
+    calls: list[list[str]] = []
+    mock = _mock_stdout([
+        {
+            "id": "v1",
+            "title": "Video",
+            "duration": 300,
+            "view_count": 10,
+            "upload_date": "20230101",
+        },
+    ])
+
+    def fake_run_ytdlp(args):
+        calls.append(args)
+        return mock
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        fetch_channel_videos("https://www.youtube.com/@creator")
+
+    assert calls[0][-1] == "https://www.youtube.com/@creator/videos"
+
+
 def test_run_ytdlp_uses_cookie_file_path(monkeypatch):
     """YTDLP_COOKIES_PATH is passed directly to yt-dlp."""
     monkeypatch.setenv("YTDLP_COOKIES_PATH", "/secrets/youtube-cookies.txt")
@@ -167,6 +189,7 @@ def test_resolve_channel_uses_flat_playlist_for_metadata():
         "channel_id": "UC123",
         "channel_name": "Creator Name",
         "channel_handle": "creator",
+        "channel_url": "https://www.youtube.com/@creator",
         "avatar_url": "https://example.test/avatar.jpg",
     }
     assert calls[0] == [
@@ -208,6 +231,7 @@ def test_resolve_channel_falls_back_when_ytdlp_prints_na():
 
     assert meta["channel_id"] == "UCkcBDNWKUSczL9TIx-7h6Qw"
     assert meta["channel_name"] == "David Fragomeni"
+    assert meta["channel_handle"] == "david.fragomeni"
     assert calls[1] == [
         "--flat-playlist",
         "--dump-single-json",

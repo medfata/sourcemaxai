@@ -106,6 +106,33 @@ def _channel_id_from_url(url: Any) -> str:
     return ""
 
 
+def _channel_handle_from_url(url: Any) -> str:
+    text = _clean_ytdlp_value(url)
+    if not text:
+        return ""
+    path_parts = [part for part in urlparse(text).path.split("/") if part]
+    for part in path_parts:
+        if part.startswith("@"):
+            return part[1:]
+    return ""
+
+
+def channel_videos_url(channel_url: str) -> str:
+    """Return the channel Videos tab URL for yt-dlp flat listing."""
+    base = channel_url.rstrip("/")
+    if base.endswith("/videos"):
+        return base
+    return f"{base}/videos"
+
+
+def channel_playlists_url(channel_url: str) -> str:
+    """Return the channel Playlists tab URL for yt-dlp flat listing."""
+    base = channel_url.rstrip("/")
+    if base.endswith("/playlists"):
+        return base
+    return f"{base}/playlists"
+
+
 def _metadata_from_info(info: dict[str, Any]) -> dict[str, str]:
     channel_url = _clean_ytdlp_value(
         info.get("channel_url") or info.get("uploader_url") or info.get("webpage_url")
@@ -209,12 +236,10 @@ def resolve_channel(url: str) -> dict[str, Any]:
 
     channel_id = metadata["channel_id"]
     channel_name = metadata["channel_name"]
-    channel_url = metadata["channel_url"]
+    channel_url = metadata["channel_url"] or f"https://www.youtube.com/channel/{channel_id}"
 
     # Extract handle from URL if present
-    handle: str | None = None
-    if "@" in channel_url:
-        handle = channel_url.split("@")[1].split("/")[0]
+    handle = _channel_handle_from_url(channel_url) or _channel_handle_from_url(url) or None
 
     # Try to get avatar via --dump-json on the channel page (one item)
     avatar_url: str | None = None
@@ -241,6 +266,7 @@ def resolve_channel(url: str) -> dict[str, Any]:
         "channel_id": channel_id,
         "channel_name": channel_name,
         "channel_handle": handle,
+        "channel_url": channel_url,
         "avatar_url": avatar_url,
     }
 
@@ -259,7 +285,7 @@ def fetch_channel_videos(channel_url: str) -> list[dict[str, Any]]:
             "--dump-json",
             "--extractor-args",
             "youtubetab:approximate_date",
-            channel_url,
+            channel_videos_url(channel_url),
         ]
     )
     videos: list[dict[str, Any]] = []
@@ -298,7 +324,7 @@ def fetch_channel_playlists(channel_url: str) -> list[dict[str, Any]]:
     Each dict contains: id, title, video_count, thumbnail.
     Runs yt-dlp --flat-playlist --dump-json against <channel_url>/playlists.
     """
-    url = channel_url.rstrip("/") + "/playlists"
+    url = channel_playlists_url(channel_url)
     stdout = _run_ytdlp(["--flat-playlist", "--dump-json", url])
     playlists: list[dict[str, Any]] = []
     for line in stdout.strip().splitlines():

@@ -28,6 +28,16 @@ from fastapi.responses import PlainTextResponse
 router = APIRouter()
 
 
+def _channel_url_from_meta(channel_id: str, meta: dict) -> str:
+    channel_url = str(meta.get("channel_url") or "").strip()
+    if channel_url:
+        return channel_url
+    handle = str(meta.get("channel_handle") or "").strip()
+    if handle:
+        return f"https://www.youtube.com/@{handle.lstrip('@')}"
+    return f"https://www.youtube.com/channel/{channel_id}"
+
+
 @router.post("/api/channel")
 def post_channel(
     payload: ChannelUrlPayload,
@@ -86,14 +96,8 @@ def refresh_channel_route(
     if not meta:
         return ApiResponse(ok=False, error="Channel not found")
 
-    handle = str(meta.get("channel_handle") or "").strip()
-    if handle:
-        channel_url = f"https://www.youtube.com/@{handle.lstrip('@')}"
-    else:
-        channel_url = f"https://www.youtube.com/channel/{channel_id}"
-
     try:
-        fetched = fetch_channel_videos(channel_url)
+        fetched = fetch_channel_videos(_channel_url_from_meta(channel_id, meta))
     except Exception as exc:
         return ApiResponse(ok=False, error=str(exc))
 

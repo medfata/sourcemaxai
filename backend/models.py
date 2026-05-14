@@ -78,6 +78,27 @@ class VideoList(BaseModel):
     videos: list[Video]
 
 
+class VideoPage(BaseModel):
+    """Paginated slice of videos for a channel."""
+
+    channel_id: str
+    kind: str
+    offset: int
+    limit: int
+    total: int
+    videos: list[Video]
+    has_more: bool
+
+
+class ChannelCounts(BaseModel):
+    """Total counts of videos/shorts/playlists for a channel."""
+
+    channel_id: str
+    videos: int
+    shorts: int
+    playlists: int
+
+
 class Playlist(BaseModel):
     """A YouTube playlist."""
     id: str

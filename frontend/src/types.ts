@@ -49,6 +49,23 @@ export interface VideoList {
   videos: Video[]
 }
 
+export interface VideoPage {
+  channel_id: string
+  kind: 'videos' | 'shorts'
+  offset: number
+  limit: number
+  total: number
+  videos: Video[]
+  has_more: boolean
+}
+
+export interface ChannelCounts {
+  channel_id: string
+  videos: number
+  shorts: number
+  playlists: number
+}
+
 export interface ChannelSummary {
   channel_id: string
   channel_name: string

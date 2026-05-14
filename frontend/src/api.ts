@@ -1,5 +1,6 @@
 import type {
   ApiResponse,
+  ChannelCounts,
   ChannelList,
   ChannelMeta,
   ChannelRefreshResult,
@@ -14,6 +15,7 @@ import type {
   Selection,
   UsageSummary,
   VideoList,
+  VideoPage,
   WaitlistJoinResult,
 } from './types'
 import { getAccessToken } from './authState'
@@ -90,6 +92,12 @@ export const api = {
     }),
   channel: (url: string) => apiPost<ChannelMeta>('/api/channel', { url }),
   videos: (channelId: string) => apiGet<VideoList>(`/api/videos?channel_id=${channelId}`),
+  videoPage: (channelId: string, kind: 'videos' | 'shorts', offset: number, limit = 50) =>
+    apiGet<VideoPage>(
+      `/api/videos/page?channel_id=${channelId}&kind=${kind}&offset=${offset}&limit=${limit}`,
+    ),
+  channelCounts: (channelId: string) =>
+    apiGet<ChannelCounts>(`/api/videos/counts?channel_id=${channelId}`),
   selection: (channelId: string) => apiGet<Selection>(`/api/selection?channel_id=${channelId}`),
   selectVideos: (channelId: string, videoIds: string[]) =>
     apiPost<Selection>('/api/videos/select', { channel_id: channelId, video_ids: videoIds }),

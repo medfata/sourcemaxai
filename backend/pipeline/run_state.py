@@ -143,7 +143,11 @@ class LocalPipelineRunStore(PipelineRunStore):
 
     def queue_resume(self, owner_id: str, channel_id: str) -> dict[str, Any] | None:
         state = self.read_state(owner_id, channel_id)
-        if not state or state.get("status") != "awaiting_confirm_summaries":
+        if not state or state.get("status") not in {
+            "awaiting_confirm_summaries",
+            "cancelled",
+            "failed",
+        }:
             return None
         state["status"] = "queued"
         state["current_stage"] = "summaries"
@@ -504,7 +508,11 @@ class SupabasePipelineRunStore(PipelineRunStore):
 
     def queue_resume(self, owner_id: str, channel_id: str) -> dict[str, Any] | None:
         run = self.latest_run(owner_id, channel_id)
-        if not run or run.get("status") != "awaiting_confirm_summaries":
+        if not run or run.get("status") not in {
+            "awaiting_confirm_summaries",
+            "cancelled",
+            "failed",
+        }:
             return None
         rows = self._update(
             "pipeline_runs",

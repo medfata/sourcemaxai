@@ -140,6 +140,20 @@ def _estimate_summary_work(channel_id: str, selection: list[str]) -> dict[str, A
     }
 
 
+def _has_summarizable_transcript(channel_id: str, selection: list[str]) -> bool:
+    """True if at least one selected video has a transcript with content."""
+    channel_dir = get_channel_dir(channel_id)
+    for vid in selection:
+        transcript = read_json(channel_dir / "transcripts" / f"{vid}.json")
+        if not isinstance(transcript, dict):
+            continue
+        if transcript.get("source") == "unavailable":
+            continue
+        if int(transcript.get("word_count") or 0) > 0:
+            return True
+    return False
+
+
 def _estimate_pipeline_cost(
     channel_id: str,
     selection: list[str],
@@ -190,10 +204,6 @@ def _with_generated_file_report(channel_id: str, state: dict) -> dict:
     return enriched
 
 
-def _broadcast(channel_id: str, event: str, data: dict) -> None:
-    """Compatibility hook; SSE now polls durable state instead of memory queues."""
-
-
 async def _run_pipeline_for_owner(
     owner_id: str,
     channel_id: str,
@@ -224,11 +234,6 @@ async def _run_pipeline(
             state["status"] = "cancelled"
             state["completed_at"] = utc_now_iso()
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(
-                channel_id,
-                "pipeline_cancelled",
-                _with_generated_file_report(channel_id, state),
-            )
             raise PipelineCancelled()
 
     state = _read_pipeline_state(channel_id)
@@ -249,7 +254,6 @@ async def _run_pipeline(
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
     state = _read_pipeline_state(channel_id) or {}
     if run_id:
@@ -279,7 +283,6 @@ async def _run_pipeline(
             "claim_count",
             "supported_claim_count",
             "unsupported_claim_count",
-            "rate_limited",
             "error",
         ):
             if key in result:
@@ -297,11 +300,6 @@ async def _run_pipeline(
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
         except Exception as exc:
             print(f"[pipeline] progress state write failed: {exc}")
-        _broadcast(
-            channel_id,
-            "video_update",
-            {"video_id": vid, "status": status, "stage": stage, "stage_id": stage_name},
-        )
 
     def make_on_progress(stage_name: str):
         def on_progress(result: dict) -> None:
@@ -322,7 +320,6 @@ async def _run_pipeline(
             _ensure_not_cancelled(state)
             state["stages"]["transcripts"]["status"] = "done"
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
             # Stage 2: Caption chunks
             state["current_stage"] = "chunks"
@@ -333,7 +330,6 @@ async def _run_pipeline(
                 "videos": {},
             }
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
             _ensure_not_cancelled(state)
             await asyncio.to_thread(
@@ -342,13 +338,11 @@ async def _run_pipeline(
             _ensure_not_cancelled(state)
             state["stages"]["chunks"]["status"] = "done"
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
             # Pause for user confirmation before summaries
             state["status"] = "awaiting_confirm_summaries"
             state["current_stage"] = "awaiting_confirm_summaries"
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
             return
 
         chunks_stage = state.get("stages", {}).get("chunks")
@@ -367,7 +361,6 @@ async def _run_pipeline(
                 "videos": {},
             }
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
             _ensure_not_cancelled(state)
             await asyncio.to_thread(
@@ -376,7 +369,6 @@ async def _run_pipeline(
             _ensure_not_cancelled(state)
             state["stages"]["chunks"]["status"] = "done"
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
-            _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
         # Stage 3: Summaries (resume path)
         state["status"] = "running"
@@ -388,14 +380,12 @@ async def _run_pipeline(
             "videos": {},
         }
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
         _ensure_not_cancelled(state)
         await summarize(channel_id, on_progress=make_on_progress("summaries"))
         _ensure_not_cancelled(state)
         state["stages"]["summaries"]["status"] = "done"
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
         # Stage 4: Profile (aggregation)
         state["current_stage"] = "profile"
@@ -403,7 +393,6 @@ async def _run_pipeline(
             "status": "running",
         }
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "stage_update", _with_generated_file_report(channel_id, state))
 
         _ensure_not_cancelled(state)
         await asyncio.to_thread(aggregate, channel_id)
@@ -413,7 +402,6 @@ async def _run_pipeline(
         state["status"] = "completed"
         state["completed_at"] = utc_now_iso()
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "pipeline_complete", _with_generated_file_report(channel_id, state))
     except PipelineCancelled:
         pass
     except asyncio.CancelledError:
@@ -426,7 +414,6 @@ async def _run_pipeline(
         state["error"] = str(exc)
         state["completed_at"] = utc_now_iso()
         _write_pipeline_state(channel_id, state, owner_id=owner_id)
-        _broadcast(channel_id, "pipeline_error", _with_generated_file_report(channel_id, state))
 
 
 async def _process_queued_runs() -> None:
@@ -534,9 +521,6 @@ async def post_pipeline_cancel(
 
     store = get_pipeline_run_store()
     store.cancel_latest(owner_id, channel_id)
-    with storage_owner(owner_id):
-        state = _read_pipeline_state(channel_id) or {"status": "cancelled"}
-        _broadcast(channel_id, "pipeline_cancelled", _with_generated_file_report(channel_id, state))
 
     return ApiResponse(ok=True, data={"status": "cancelled"})
 
@@ -556,13 +540,16 @@ async def post_pipeline_resume(
 
     with storage_owner(owner_id):
         state = _read_pipeline_state(channel_id)
-    if not state or state.get("status") != "awaiting_confirm_summaries":
-        return ApiResponse(ok=False, error="pipeline is not awaiting confirmation")
+        selection = load_selection(channel_id) or []
+        has_transcript = _has_summarizable_transcript(channel_id, selection)
+    status = (state or {}).get("status")
+    resumable_after_stop = status in {"cancelled", "failed"} and has_transcript
+    if not state or (status != "awaiting_confirm_summaries" and not resumable_after_stop):
+        return ApiResponse(ok=False, error="pipeline is not ready for summaries")
 
     quota_store = get_quota_store()
     if quota_store.is_enforced:
         with storage_owner(owner_id):
-            selection = load_selection(channel_id) or []
             estimate = _estimate_summary_work(channel_id, selection)
         decision = check_pipeline_start(
             quota_store,
@@ -603,7 +590,7 @@ async def post_pipeline_resume(
 
 
 async def _sse_event_stream(owner_id: str, channel_id: str):
-    poll_seconds = float(os.environ.get("PIPELINE_SSE_POLL_SECONDS", "1.0"))
+    poll_seconds = float(os.environ.get("PIPELINE_SSE_POLL_SECONDS", "0.4"))
     last_payload: str | None = None
     try:
         if not load_channel_meta(channel_id, owner_id=owner_id):

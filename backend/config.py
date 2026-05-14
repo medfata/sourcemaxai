@@ -91,14 +91,21 @@ def load_runtime_config(role: str = "api") -> RuntimeConfig:
             errors.append("MINIMAX_API_KEY is required in production")
         if not cors_origins:
             errors.append("CORS_ORIGINS must include the deployed frontend origin")
-        if role == "api" and not (_env("YTDLP_COOKIES_PATH") or _env("YTDLP_COOKIES_B64")):
-            warnings.append(
-                "YTDLP_COOKIES_B64 or YTDLP_COOKIES_PATH is recommended in production; "
-                "hosted IPs may be blocked by YouTube bot checks"
-            )
-
     if role == "worker" and storage_backend != "supabase":
         warnings.append("Standalone worker has no durable queue unless STORAGE_BACKEND=supabase")
+
+    if (
+        role == "api"
+        and app_env.lower() not in PRODUCTION_ENV_NAMES
+        and storage_backend == "supabase"
+        and worker_mode == "embedded"
+        and _env("ALLOW_LOCAL_SUPABASE_EMBEDDED_WORKER").lower() != "true"
+    ):
+        warnings.append(
+            "PIPELINE_WORKER_MODE=embedded is ignored for local Supabase API runs. "
+            "Start backend.worker separately, or set ALLOW_LOCAL_SUPABASE_EMBEDDED_WORKER=true "
+            "if this process should claim the shared durable queue."
+        )
 
     if _env("SUPABASE_URL") and not _env("SUPABASE_JWT_SECRET"):
         warnings.append("SUPABASE_JWT_SECRET is not set; HS256 Supabase JWTs cannot be verified")
@@ -127,6 +134,13 @@ def validate_runtime_config(role: str = "api", *, strict: bool | None = None) ->
 def embedded_worker_enabled() -> bool:
     """Return whether the API process should also run pipeline worker tasks."""
     config = load_runtime_config("api")
+    if (
+        not config.is_production
+        and config.storage_backend == "supabase"
+        and os.environ.get("ALLOW_LOCAL_SUPABASE_EMBEDDED_WORKER", "").strip().lower()
+        != "true"
+    ):
+        return False
     return config.pipeline_worker_mode == "embedded"
 
 

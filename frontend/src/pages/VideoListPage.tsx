@@ -17,15 +17,38 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const PAGE_SIZE = 50
 const MAX_SELECTION = 300
 
+interface PageState {
+  videos: Video[]
+  loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  total: number
+  error: string | null
+}
+
+const emptyPage = (): PageState => ({
+  videos: [],
+  loading: false,
+  loadingMore: false,
+  hasMore: false,
+  total: 0,
+  error: null,
+})
+
 export default function VideoListPage({ channel, onRunPipeline }: VideoListPageProps) {
-  const [videos, setVideos] = useState<Video[]>([])
+  const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
+
+  const [counts, setCounts] = useState<{ videos: number; shorts: number; playlists: number } | null>(null)
+
+  const [longPage, setLongPage] = useState<PageState>(() => emptyPage())
+  const [shortsPage, setShortsPage] = useState<PageState>(() => emptyPage())
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set())
   const [playlistsLoading, setPlaylistsLoading] = useState(false)
@@ -33,52 +56,92 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   const [playlistsError, setPlaylistsError] = useState<string | null>(null)
   const [expansionError, setExpansionError] = useState<string | null>(null)
   const playlistsAttemptedRef = useRef(false)
+  const longAttemptedRef = useRef(false)
+  const shortsAttemptedRef = useRef(false)
 
-  const longVideos = videos.filter((v) => !v.is_short)
-  const shortVideos = videos.filter((v) => v.is_short)
+  const loadPage = useCallback(
+    async (kind: 'videos' | 'shorts', mode: 'initial' | 'more') => {
+      const setter = kind === 'videos' ? setLongPage : setShortsPage
+      setter((prev) => ({
+        ...prev,
+        loading: mode === 'initial' ? true : prev.loading,
+        loadingMore: mode === 'more' ? true : prev.loadingMore,
+        error: null,
+      }))
+      const offset = mode === 'initial' ? 0 : (kind === 'videos' ? longPage.videos.length : shortsPage.videos.length)
+      const res = await api.videoPage(channel.channel_id, kind, offset, PAGE_SIZE)
+      if (!res.ok || !res.data) {
+        setter((prev) => ({
+          ...prev,
+          loading: false,
+          loadingMore: false,
+          error: res.error ?? 'Failed to load',
+        }))
+        return
+      }
+      const newVids = res.data.videos
+      setter((prev) => ({
+        videos: mode === 'initial' ? newVids : [...prev.videos, ...newVids],
+        loading: false,
+        loadingMore: false,
+        hasMore: res.data!.has_more,
+        total: res.data!.total,
+        error: null,
+      }))
+    },
+    [channel.channel_id, longPage.videos.length, shortsPage.videos.length],
+  )
 
+  // Reset everything when channel changes
+  useEffect(() => {
+    setCounts(null)
+    setLongPage(emptyPage())
+    setShortsPage(emptyPage())
+    setPlaylists([])
+    setSelectedPlaylistIds(new Set())
+    setSelectedIds(new Set())
+    setPlaylistsError(null)
+    setExpansionError(null)
+    playlistsAttemptedRef.current = false
+    longAttemptedRef.current = false
+    shortsAttemptedRef.current = false
+  }, [channel.channel_id])
+
+  // Counts + persisted selection on mount
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
-      const [videosRes, selRes] = await Promise.all([
-        api.videos(channel.channel_id),
+      const [countsRes, selRes] = await Promise.all([
+        api.channelCounts(channel.channel_id),
         api.selection(channel.channel_id),
       ])
       if (cancelled) return
-      const vids = videosRes.data?.videos ?? []
-      setVideos(vids)
-      const ids = selRes.data?.video_ids ?? vids.map((v) => v.id)
+      if (countsRes.ok && countsRes.data) {
+        setCounts({
+          videos: countsRes.data.videos,
+          shorts: countsRes.data.shorts,
+          playlists: countsRes.data.playlists,
+        })
+      }
+      const ids = selRes.data?.video_ids ?? []
       setSelectedIds(new Set(ids))
-      setLoading(false)
     }
     load()
-    return () => { cancelled = true }
-  }, [channel.channel_id])
-
-  useEffect(() => {
-    playlistsAttemptedRef.current = false
-    setPlaylists([])
-    setSelectedPlaylistIds(new Set())
-    setPlaylistsError(null)
-    setExpansionError(null)
-  }, [channel.channel_id])
-
-  useEffect(() => {
-    const stored = localStorage.getItem(`cp_playlists_${channel.channel_id}`)
-    if (stored) {
-      try { setSelectedPlaylistIds(new Set(JSON.parse(stored))) } catch { /* ignore */ }
+    return () => {
+      cancelled = true
     }
   }, [channel.channel_id])
 
+  // Lazy load tab data on first visit
   useEffect(() => {
-    localStorage.setItem(
-      `cp_playlists_${channel.channel_id}`,
-      JSON.stringify(Array.from(selectedPlaylistIds)),
-    )
-  }, [selectedPlaylistIds, channel.channel_id])
-
-  useEffect(() => {
+    if (tab === 'videos' && !longAttemptedRef.current) {
+      longAttemptedRef.current = true
+      loadPage('videos', 'initial')
+    }
+    if (tab === 'shorts' && !shortsAttemptedRef.current) {
+      shortsAttemptedRef.current = true
+      loadPage('shorts', 'initial')
+    }
     if (tab === 'playlists' && !playlistsAttemptedRef.current) {
       playlistsAttemptedRef.current = true
       setPlaylistsLoading(true)
@@ -93,7 +156,22 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
         setPlaylistsLoading(false)
       })
     }
-  }, [tab, channel.channel_id])
+  }, [tab, channel.channel_id, loadPage])
+
+  // Persist playlist selection per-channel
+  useEffect(() => {
+    const stored = localStorage.getItem(`cp_playlists_${channel.channel_id}`)
+    if (stored) {
+      try { setSelectedPlaylistIds(new Set(JSON.parse(stored))) } catch { /* ignore */ }
+    }
+  }, [channel.channel_id])
+
+  useEffect(() => {
+    localStorage.setItem(
+      `cp_playlists_${channel.channel_id}`,
+      JSON.stringify(Array.from(selectedPlaylistIds)),
+    )
+  }, [selectedPlaylistIds, channel.channel_id])
 
   const persistSelection = async (next: Set<string>) => {
     setSelectedIds(next)
@@ -134,7 +212,7 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   }
 
   const selectLast50 = (subset: Video[]) => {
-    const ids = subset.slice(-50).map((v) => v.id)
+    const ids = subset.slice(0, 50).map((v) => v.id)
     replaceSubsetSelection(subset, new Set(ids))
   }
 
@@ -181,9 +259,12 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     onRunPipeline()
   }
 
+  const longVideos = longPage.videos
+  const shortVideos = shortsPage.videos
   const selectedLongCount = longVideos.filter((v) => selectedIds.has(v.id)).length
   const selectedShortCount = shortVideos.filter((v) => selectedIds.has(v.id)).length
   const selectedPlaylistCount = selectedPlaylistIds.size
+
   const optimisticTotal =
     selectedIds.size +
     playlists
@@ -197,9 +278,9 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
     const subset = tab === 'videos' ? longVideos : shortVideos
     if (subset.length > 0) {
       quickActions = [
-        { label: 'All', onClick: () => selectVideoSubset(subset) },
+        { label: 'All loaded', onClick: () => selectVideoSubset(subset) },
         { label: 'None', onClick: () => deselectSubset(subset) },
-        { label: 'Last 50', onClick: () => selectLast50(subset) },
+        { label: 'First 50', onClick: () => selectLast50(subset) },
         { label: 'Last year', onClick: () => selectLastYear(subset) },
       ]
     }
@@ -211,21 +292,10 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
   }
 
   const tabs = [
-    { id: 'videos' as const, label: 'Videos', count: longVideos.length },
-    { id: 'playlists' as const, label: 'Playlists', count: playlists.length },
-    { id: 'shorts' as const, label: 'Shorts', count: shortVideos.length },
+    { id: 'videos' as const, label: 'Videos', count: counts?.videos ?? longVideos.length },
+    { id: 'playlists' as const, label: 'Playlists', count: counts?.playlists ?? playlists.length },
+    { id: 'shorts' as const, label: 'Shorts', count: counts?.shorts ?? shortVideos.length },
   ]
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[100svh] bg-cream dark:bg-ink-900">
-        <div className="flex items-center gap-3 text-ink-400">
-          <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
-          <span className="text-[14px]">Loading library</span>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="min-h-[100svh] bg-cream dark:bg-ink-900 pb-32">
@@ -248,7 +318,13 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
                   {channel.channel_name}
                 </h1>
                 <p className="mt-1 text-[14px] text-ink-500 dark:text-white/50">
-                  <span className="font-mono">{videos.length}</span> videos available · select what to analyze
+                  {counts ? (
+                    <>
+                      <span className="font-mono">{counts.videos}</span> videos · <span className="font-mono">{counts.shorts}</span> shorts · <span className="font-mono">{counts.playlists}</span> playlists
+                    </>
+                  ) : (
+                    <span className="text-ink-400">counting…</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -299,18 +375,28 @@ export default function VideoListPage({ channel, onRunPipeline }: VideoListPageP
       {/* Grid */}
       <div className="max-w-6xl mx-auto px-6 pt-8">
         {tab === 'videos' && (
-          longVideos.length === 0 ? (
-            <EmptyState text="No long-form videos on this channel." />
-          ) : (
-            <VideoGrid videos={longVideos} aspect="aspect-video" cols="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4" selectedIds={selectedIds} onToggle={toggleVideo} formatDuration={formatDuration} />
-          )
+          <PaginatedSection
+            state={longPage}
+            aspect="aspect-video"
+            cols="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+            selectedIds={selectedIds}
+            onToggle={toggleVideo}
+            onLoadMore={() => loadPage('videos', 'more')}
+            emptyText="No long-form videos on this channel."
+            formatDuration={formatDuration}
+          />
         )}
         {tab === 'shorts' && (
-          shortVideos.length === 0 ? (
-            <EmptyState text="No Shorts on this channel." />
-          ) : (
-            <VideoGrid videos={shortVideos} aspect="aspect-[9/16]" cols="grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" selectedIds={selectedIds} onToggle={toggleVideo} formatDuration={formatDuration} />
-          )
+          <PaginatedSection
+            state={shortsPage}
+            aspect="aspect-[9/16]"
+            cols="grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+            selectedIds={selectedIds}
+            onToggle={toggleVideo}
+            onLoadMore={() => loadPage('shorts', 'more')}
+            emptyText="No Shorts on this channel."
+            formatDuration={formatDuration}
+          />
         )}
         {tab === 'playlists' && (
           playlistsLoading ? (
@@ -445,6 +531,57 @@ function SelectionBadge({ selected }: { selected: boolean }) {
   )
 }
 
+function PaginatedSection({
+  state, aspect, cols, selectedIds, onToggle, onLoadMore, emptyText, formatDuration,
+}: {
+  state: PageState
+  aspect: string
+  cols: string
+  selectedIds: Set<string>
+  onToggle: (id: string) => void
+  onLoadMore: () => void
+  emptyText: string
+  formatDuration: (s: number) => string
+}) {
+  if (state.loading) return <EmptyState text="Loading…" />
+  if (state.error) return <EmptyState text={state.error} error />
+  if (state.videos.length === 0) return <EmptyState text={emptyText} />
+
+  return (
+    <>
+      <VideoGrid
+        videos={state.videos}
+        aspect={aspect}
+        cols={cols}
+        selectedIds={selectedIds}
+        onToggle={onToggle}
+        formatDuration={formatDuration}
+      />
+      <div className="flex flex-col items-center gap-2 mt-8">
+        <p className="text-[12px] font-mono text-ink-400">
+          {state.videos.length} of {state.total} loaded
+        </p>
+        {state.hasMore && (
+          <button
+            onClick={onLoadMore}
+            disabled={state.loadingMore}
+            className="h-10 px-5 rounded-xl border border-black/[0.08] dark:border-white/10 text-[13px] text-ink-700 dark:text-white/70 hover:border-ink-900/30 hover:bg-white dark:hover:bg-white/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {state.loadingMore ? (
+              <>
+                <span className="w-3 h-3 rounded-full border-2 border-current border-r-transparent animate-spin" />
+                Loading
+              </>
+            ) : (
+              `Load next ${PAGE_SIZE}`
+            )}
+          </button>
+        )}
+      </div>
+    </>
+  )
+}
+
 function VideoGrid({
   videos, aspect, cols, selectedIds, onToggle, formatDuration,
 }: {
@@ -472,9 +609,11 @@ function VideoGrid({
           >
             <div className={`relative ${aspect} bg-ink-100 dark:bg-ink-600`}>
               <img src={video.thumbnail} alt={video.title} loading="lazy" className="w-full h-full object-cover" />
-              <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/75 text-white text-[11px] font-mono">
-                {formatDuration(video.duration)}
-              </div>
+              {video.duration > 0 && (
+                <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/75 text-white text-[11px] font-mono">
+                  {formatDuration(video.duration)}
+                </div>
+              )}
               <SelectionBadge selected={isSelected} />
             </div>
             <div className="p-3.5">

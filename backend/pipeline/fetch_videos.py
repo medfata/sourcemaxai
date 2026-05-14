@@ -1,70 +1,10 @@
 """Fetch video listings from a YouTube channel using yt-dlp."""
 
-import base64
-import binascii
 import json
-import os
 import subprocess
-import tempfile
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import urlparse
-
-_RUNTIME_COOKIE_FILE: Path | None = None
-_RUNTIME_COOKIE_SOURCE: str | None = None
-
-
-def _normalize_cookie_text(cookies: str) -> str:
-    normalized = cookies.replace("\r\n", "\n").replace("\r", "\n")
-    if normalized and not normalized.endswith("\n"):
-        normalized += "\n"
-    return normalized
-
-
-def _write_runtime_cookie_file(cookies: str) -> Path:
-    global _RUNTIME_COOKIE_FILE, _RUNTIME_COOKIE_SOURCE
-
-    normalized = _normalize_cookie_text(cookies)
-    if not normalized.strip():
-        raise RuntimeError("YTDLP_COOKIES_B64 is set but does not contain any cookies")
-
-    if (
-        _RUNTIME_COOKIE_FILE
-        and _RUNTIME_COOKIE_SOURCE == normalized
-        and _RUNTIME_COOKIE_FILE.exists()
-    ):
-        return _RUNTIME_COOKIE_FILE
-
-    cookie_path = Path(tempfile.gettempdir()) / "trace-ytdlp-cookies.txt"
-    cookie_path.write_text(normalized, encoding="utf-8", newline="\n")
-    try:
-        cookie_path.chmod(0o600)
-    except OSError:
-        pass
-
-    _RUNTIME_COOKIE_FILE = cookie_path
-    _RUNTIME_COOKIE_SOURCE = normalized
-    return cookie_path
-
-
-def _ytdlp_cookie_args() -> list[str]:
-    """Return yt-dlp cookie options from deployment environment."""
-    cookies_path = os.environ.get("YTDLP_COOKIES_PATH", "").strip()
-    if cookies_path:
-        return ["--cookies", cookies_path]
-
-    cookies_b64 = "".join(os.environ.get("YTDLP_COOKIES_B64", "").split())
-    if not cookies_b64:
-        return []
-
-    try:
-        cookies = base64.b64decode(cookies_b64, validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError) as exc:
-        raise RuntimeError(
-            "YTDLP_COOKIES_B64 must be base64-encoded UTF-8 Netscape cookies.txt content"
-        ) from exc
-
-    return ["--cookies", str(_write_runtime_cookie_file(cookies))]
 
 
 def _run_ytdlp(args: list[str]) -> str:
@@ -76,7 +16,6 @@ def _run_ytdlp(args: list[str]) -> str:
         "--ignore-config",
         "--no-warnings",
         "--no-check-certificates",
-        *_ytdlp_cookie_args(),
         *args,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -117,20 +56,27 @@ def _channel_handle_from_url(url: Any) -> str:
     return ""
 
 
+def _strip_tab(channel_url: str) -> str:
+    base = channel_url.rstrip("/")
+    for tab in ("/videos", "/shorts", "/streams", "/playlists", "/featured", "/community"):
+        if base.endswith(tab):
+            return base[: -len(tab)]
+    return base
+
+
 def channel_videos_url(channel_url: str) -> str:
     """Return the channel Videos tab URL for yt-dlp flat listing."""
-    base = channel_url.rstrip("/")
-    if base.endswith("/videos"):
-        return base
-    return f"{base}/videos"
+    return f"{_strip_tab(channel_url)}/videos"
+
+
+def channel_shorts_url(channel_url: str) -> str:
+    """Return the channel Shorts tab URL for yt-dlp flat listing."""
+    return f"{_strip_tab(channel_url)}/shorts"
 
 
 def channel_playlists_url(channel_url: str) -> str:
     """Return the channel Playlists tab URL for yt-dlp flat listing."""
-    base = channel_url.rstrip("/")
-    if base.endswith("/playlists"):
-        return base
-    return f"{base}/playlists"
+    return f"{_strip_tab(channel_url)}/playlists"
 
 
 def _metadata_from_info(info: dict[str, Any]) -> dict[str, str]:
@@ -271,29 +217,25 @@ def resolve_channel(url: str) -> dict[str, Any]:
     }
 
 
-def fetch_channel_videos(channel_url: str) -> list[dict[str, Any]]:
-    """Return every video on the channel as a list of dicts.
+def _parse_video_entries(stdout: str, *, is_short: bool) -> list[dict[str, Any]]:
+    videos, _ = _parse_video_entries_with_total(stdout, is_short=is_short)
+    return videos
 
-    Each dict contains: id, title, upload_date, duration, view_count, thumbnail.
-    Sorted ascending by upload_date (oldest first).
 
-    Uses --flat-playlist --dump-json for speed, with approximate_date fallback.
-    """
-    stdout = _run_ytdlp(
-        [
-            "--flat-playlist",
-            "--dump-json",
-            "--extractor-args",
-            "youtubetab:approximate_date",
-            channel_videos_url(channel_url),
-        ]
-    )
+def _parse_video_entries_with_total(
+    stdout: str, *, is_short: bool
+) -> tuple[list[dict[str, Any]], int | None]:
     videos: list[dict[str, Any]] = []
+    total: int | None = None
     for line in stdout.strip().splitlines():
         line = line.strip()
         if not line:
             continue
         info = json.loads(line)
+        if total is None:
+            raw_total = info.get("playlist_count") or info.get("n_entries")
+            if isinstance(raw_total, int) and raw_total > 0:
+                total = raw_total
         vid = info.get("id")
         if not vid:
             continue
@@ -309,24 +251,136 @@ def fetch_channel_videos(channel_url: str) -> list[dict[str, Any]]:
                 "duration": duration_val,
                 "view_count": int(view_count) if view_count else 0,
                 "thumbnail": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
-                "is_short": 0 < duration_val <= 60,
+                "is_short": True if is_short else (0 < duration_val <= 60),
             }
         )
+    return videos, total
 
-    # Sort by date if available; undated videos go to the end
-    videos.sort(key=lambda v: v["upload_date"] or "99991231")
+
+def _playlist_items_arg(start: int, end: int | None) -> str:
+    start = max(int(start), 1)
+    if end is None or int(end) <= 0:
+        return f"{start}:"
+    return f"{start}:{int(end)}"
+
+
+def fetch_channel_videos(
+    channel_url: str,
+    *,
+    start: int = 1,
+    end: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return videos from the channel /videos tab as a list of dicts.
+
+    Each dict contains: id, title, upload_date, duration, view_count, thumbnail, is_short.
+    Order: YouTube's listing order (newest first by default).
+
+    Pagination via 1-based ``start`` and inclusive ``end`` indices.
+    """
+    videos, _ = fetch_channel_videos_page(channel_url, start=start, end=end)
     return videos
+
+
+def fetch_channel_videos_page(
+    channel_url: str,
+    *,
+    start: int = 1,
+    end: int | None = None,
+) -> tuple[list[dict[str, Any]], int | None]:
+    """Same as :func:`fetch_channel_videos` but also returns the tab's total count.
+
+    ``total`` is the channel's tab-wide ``playlist_count`` reported by yt-dlp on
+    each entry; ``None`` when yt-dlp did not emit it (rare).
+    """
+    stdout = _run_ytdlp(
+        [
+            "--flat-playlist",
+            "--dump-json",
+            "--extractor-args",
+            "youtubetab:approximate_date",
+            "--playlist-items",
+            _playlist_items_arg(start, end),
+            channel_videos_url(channel_url),
+        ]
+    )
+    return _parse_video_entries_with_total(stdout, is_short=False)
+
+
+def fetch_channel_shorts(
+    channel_url: str,
+    *,
+    start: int = 1,
+    end: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return shorts from the channel /shorts tab as a list of dicts.
+
+    yt-dlp on the /shorts tab returns each short flat (often without duration).
+    We mark every entry ``is_short=True`` since the tab is short-form by definition.
+    """
+    videos, _ = fetch_channel_shorts_page(channel_url, start=start, end=end)
+    return videos
+
+
+def fetch_channel_shorts_page(
+    channel_url: str,
+    *,
+    start: int = 1,
+    end: int | None = None,
+) -> tuple[list[dict[str, Any]], int | None]:
+    """Same as :func:`fetch_channel_shorts` but also returns the tab's total count."""
+    stdout = _run_ytdlp(
+        [
+            "--flat-playlist",
+            "--dump-json",
+            "--extractor-args",
+            "youtubetab:approximate_date",
+            "--playlist-items",
+            _playlist_items_arg(start, end),
+            channel_shorts_url(channel_url),
+        ]
+    )
+    return _parse_video_entries_with_total(stdout, is_short=True)
+
+
+def fetch_tab_count(tab_url: str) -> int:
+    """Return total item count for a channel tab (videos/shorts/playlists).
+
+    Uses ``--print "%(playlist_count)s"`` with ``--playlist-items 1`` so yt-dlp
+    only emits the top-level count without paginating through every entry.
+    Returns 0 when the count cannot be parsed.
+    """
+    try:
+        stdout = _run_ytdlp(
+            [
+                "--flat-playlist",
+                "--skip-download",
+                "--playlist-items",
+                "1",
+                "--print",
+                "playlist:%(playlist_count)s",
+                tab_url,
+            ]
+        )
+    except RuntimeError:
+        return 0
+    for line in stdout.strip().splitlines():
+        token = _clean_ytdlp_value(line)
+        if token.isdigit():
+            return int(token)
+    return 0
 
 
 def fetch_channel_playlists(channel_url: str) -> list[dict[str, Any]]:
     """Return every public playlist on the channel as a list of dicts.
 
     Each dict contains: id, title, video_count, thumbnail.
-    Runs yt-dlp --flat-playlist --dump-json against <channel_url>/playlists.
+    Per-playlist ``video_count`` is resolved with one yt-dlp call per playlist
+    (run in parallel) because the /playlists tab listing reports the outer
+    count on each entry, not the size of each individual playlist.
     """
     url = channel_playlists_url(channel_url)
     stdout = _run_ytdlp(["--flat-playlist", "--dump-json", url])
-    playlists: list[dict[str, Any]] = []
+    raw: list[dict[str, Any]] = []
     for line in stdout.strip().splitlines():
         line = line.strip()
         if not line:
@@ -335,26 +389,73 @@ def fetch_channel_playlists(channel_url: str) -> list[dict[str, Any]]:
         plid = info.get("id")
         if not plid:
             continue
-        # Note: do NOT use info.get("n_entries") here. On the /playlists tab
-        # listing, n_entries is the count of the outer tab (= number of
-        # playlists), not the size of each individual playlist.
-        video_count = info.get("playlist_count") or info.get("video_count") or 0
-        if not video_count:
-            try:
-                video_count = len(fetch_playlist_video_ids(plid))
-            except Exception:
-                video_count = 0
         thumbnail = None
         thumbnails = info.get("thumbnails")
         if thumbnails and len(thumbnails) > 0:
             thumbnail = thumbnails[-1].get("url")
-        playlists.append({
+        raw.append({
             "id": plid,
             "title": info.get("title", "Untitled"),
-            "video_count": int(video_count),
             "thumbnail": thumbnail,
         })
-    return playlists
+
+    if not raw:
+        return []
+
+    counts: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=min(8, len(raw))) as pool:
+        futures = {pool.submit(fetch_playlist_count, item["id"]): item["id"] for item in raw}
+        for fut in as_completed(futures):
+            plid = futures[fut]
+            try:
+                counts[plid] = int(fut.result() or 0)
+            except Exception:
+                counts[plid] = 0
+
+    return [
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "video_count": counts.get(item["id"], 0),
+            "thumbnail": item["thumbnail"],
+        }
+        for item in raw
+    ]
+
+
+def fetch_playlist_count(playlist_id: str) -> int:
+    """Return the total number of videos in a playlist.
+
+    Fast path: one yt-dlp call with ``--playlist-items 1`` so YouTube returns
+    the playlist_count without iterating through every entry.
+    """
+    url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    try:
+        stdout = _run_ytdlp(
+            [
+                "--flat-playlist",
+                "--skip-download",
+                "--playlist-items",
+                "1",
+                "--print",
+                "playlist:%(playlist_count)s",
+                url,
+            ]
+        )
+    except RuntimeError:
+        # Fallback: count IDs explicitly
+        try:
+            return len(fetch_playlist_video_ids(playlist_id))
+        except Exception:
+            return 0
+    for line in stdout.strip().splitlines():
+        token = _clean_ytdlp_value(line)
+        if token.isdigit():
+            return int(token)
+    try:
+        return len(fetch_playlist_video_ids(playlist_id))
+    except Exception:
+        return 0
 
 
 def fetch_playlist_video_ids(playlist_id: str) -> list[str]:

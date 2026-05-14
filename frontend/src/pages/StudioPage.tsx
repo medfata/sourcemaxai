@@ -130,6 +130,22 @@ const Icons = {
       <path d="M3 5h18l-7 9v6l-4-2v-4z" />
     </svg>
   ),
+  Ext: ({ className }: IconProps) => (
+    <svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 4h6v6M10 14 20 4M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
+    </svg>
+  ),
+  Play: ({ className }: IconProps) => (
+    <svg className={className} width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  ),
+  Evidence: ({ className }: IconProps) => (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="6" width="14" height="12" rx="1.5" />
+      <path d="M17 9h4v9a2 2 0 0 1-2 2h-2" />
+    </svg>
+  ),
 }
 
 function readGroups(): LocalChannelGroup[] {
@@ -311,10 +327,18 @@ function stagesFromState(channel: ChannelSummary | null, pipeline: PipelineState
   })
 }
 
-function stageMeta(stage: Stage, channel: ChannelSummary | null, pipeline: PipelineState | null) {
+function stageMeta(
+  stage: Stage,
+  channel: ChannelSummary | null,
+  pipeline: PipelineState | null,
+  selectedTotal: number | null = null,
+) {
   if (!channel) return ''
   if (stage.id === 'channel_input') return 'Linked'
-  if (stage.id === 'video_list') return `${channel.video_count.toLocaleString()} videos`
+  if (stage.id === 'video_list') {
+    if (selectedTotal && selectedTotal > 0) return `${selectedTotal.toLocaleString()} selected`
+    return 'Select videos'
+  }
   if (stage.id === 'transcripts') {
     const state = pipeline?.stages?.transcripts
     if (state?.total) return `${state.completed ?? 0} of ${state.total}`
@@ -376,6 +400,7 @@ export default function StudioPage({
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [pipelineSnapshot, setPipelineSnapshot] = useState<PipelineState | null>(null)
+  const [selectedTotal, setSelectedTotal] = useState<number>(0)
   const [chatSeed, setChatSeed] = useState<string | undefined>()
   const [notice, setNotice] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -493,10 +518,14 @@ export default function StudioPage({
     setSelection({ kind: 'channel', channelId: channel.channel_id })
     persistChannelMeta(metaFromSummary(channel))
     setPipelineSnapshot(null)
+    setSelectedTotal(0)
     setChatSeed(undefined)
     setActiveChatSessionId(undefined)
     setMobileSidebarOpen(false)
     setView(nextView ?? (channel.has_profile ? 'profile_ready' : 'videos'))
+    api.selection(channel.channel_id).then((res) => {
+      if (res.ok && res.data) setSelectedTotal(res.data.video_ids.length)
+    })
     api.pipelineState(channel.channel_id).then((res) => {
       if (!res.ok || !res.data || res.data.status === 'idle') return
       const data = res.data
@@ -532,6 +561,7 @@ export default function StudioPage({
     setChannelInput('')
     setSelection({ kind: 'channel', channelId: meta.channel_id })
     setPipelineSnapshot(null)
+    setSelectedTotal(0)
     setChatSeed(undefined)
     setActiveChatSessionId(undefined)
     setView('videos')
@@ -570,6 +600,7 @@ export default function StudioPage({
     clearStoredChannelMeta()
     setSelection(null)
     setPipelineSnapshot(null)
+    setSelectedTotal(0)
     setChatSeed(undefined)
     setActiveChatSessionId(undefined)
     setResolveError(null)
@@ -675,14 +706,9 @@ export default function StudioPage({
     await reloadChannels({ preserveSelection: true })
   }
 
-  const handleRunPipeline = async () => {
+  const handleRunPipeline = () => {
     if (!selectedChannel) return
     setActionError(null)
-    const res = await api.pipelineStart(selectedChannel.channel_id)
-    if (!res.ok) {
-      setActionError(res.error || 'Could not start pipeline')
-      return
-    }
     setView('transcripts')
   }
 
@@ -846,6 +872,7 @@ export default function StudioPage({
             stages={stages}
             channel={selectedChannel}
             pipeline={pipelineState}
+            selectedTotal={selectedTotal}
             onStageClick={handleStepClick}
           />
         )}
@@ -896,7 +923,9 @@ export default function StudioPage({
           {view === 'videos' && selectedMeta && (
             <VideoSelectionPanel
               channel={selectedMeta}
+              summary={selectedChannel}
               onRunPipeline={handleRunPipeline}
+              onSelectionChange={setSelectedTotal}
             />
           )}
 
@@ -908,6 +937,7 @@ export default function StudioPage({
               isError={view === 'error'}
               onBackToVideos={() => setView('videos')}
               onProfileReady={() => setView('profile_ready')}
+              onSwitchToSummaries={() => setView('summaries')}
             />
           )}
 
@@ -1479,11 +1509,13 @@ function StudioStepper({
   stages,
   channel,
   pipeline,
+  selectedTotal,
   onStageClick,
 }: {
   stages: Stage[]
   channel: ChannelSummary
   pipeline: PipelineState | null
+  selectedTotal: number
   onStageClick: (stage: Stage) => void
 }) {
   return (
@@ -1496,7 +1528,7 @@ function StudioStepper({
             </span>
             <span>
               <span className="studio-step-label">{stage.label}</span>
-              <span className="studio-step-meta">{stageMeta(stage, channel, pipeline)}</span>
+              <span className="studio-step-meta">{stageMeta(stage, channel, pipeline, selectedTotal)}</span>
             </span>
           </button>
           {index < stages.length - 1 && <span className={`studio-step-line ${stage.status === 'done' ? 'done' : stage.status === 'active' ? 'active' : ''}`} />}
@@ -1601,12 +1633,30 @@ function GroupWorkspace({
   )
 }
 
-function VideoSelectionPanel({ channel, onRunPipeline }: { channel: ChannelMeta; onRunPipeline: () => void }) {
-  const [videos, setVideos] = useState<Video[]>([])
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+function VideoSelectionPanel({
+  channel,
+  summary,
+  onRunPipeline,
+  onSelectionChange,
+}: {
+  channel: ChannelMeta
+  summary: ChannelSummary | null
+  onRunPipeline: () => void
+  onSelectionChange?: (total: number) => void
+}) {
+  const PAGE_SIZE = 50
   const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
+  const [counts, setCounts] = useState<{ videos: number; shorts: number; playlists: number } | null>(null)
+  const [longVideos, setLongVideos] = useState<Video[]>([])
+  const [shortVideos, setShortVideos] = useState<Video[]>([])
+  const [longHasMore, setLongHasMore] = useState(false)
+  const [shortHasMore, setShortHasMore] = useState(false)
+  const [longTotal, setLongTotal] = useState(0)
+  const [shortTotal, setShortTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set())
   const [playlistsLoading, setPlaylistsLoading] = useState(false)
@@ -1614,19 +1664,25 @@ function VideoSelectionPanel({ channel, onRunPipeline }: { channel: ChannelMeta;
   const [resolvingPlaylists, setResolvingPlaylists] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const playlistsAttemptedRef = useRef(false)
+  const shortsAttemptedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [videosRes, selectionRes] = await Promise.all([
-        api.videos(channel.channel_id),
+      const [longRes, selectionRes, countsRes] = await Promise.all([
+        api.videoPage(channel.channel_id, 'videos', 0, PAGE_SIZE),
         api.selection(channel.channel_id),
+        api.channelCounts(channel.channel_id),
       ])
       if (cancelled) return
-      const nextVideos = videosRes.data?.videos ?? []
-      setVideos(nextVideos)
-      setSelectedIds(new Set(selectionRes.data?.video_ids ?? nextVideos.map((video) => video.id)))
+      const longList = longRes.data?.videos ?? []
+      setLongVideos(longList)
+      setLongHasMore(longRes.data?.has_more ?? false)
+      setLongTotal(longRes.data?.total ?? longList.length)
+      if (countsRes.data) setCounts({ videos: countsRes.data.videos, shorts: countsRes.data.shorts, playlists: countsRes.data.playlists })
+      const persistedIds = selectionRes.data?.video_ids ?? []
+      setSelectedIds(new Set(persistedIds))
       setLoading(false)
     }
     void load()
@@ -1637,7 +1693,9 @@ function VideoSelectionPanel({ channel, onRunPipeline }: { channel: ChannelMeta;
 
   useEffect(() => {
     playlistsAttemptedRef.current = false
+    shortsAttemptedRef.current = false
     setPlaylists([])
+    setShortVideos([])
     setSelectedPlaylistIds(new Set())
     setPlaylistsError(null)
   }, [channel.channel_id])
@@ -1657,25 +1715,62 @@ function VideoSelectionPanel({ channel, onRunPipeline }: { channel: ChannelMeta;
   }, [channel.channel_id, selectedPlaylistIds])
 
   useEffect(() => {
-    if (tab !== 'playlists' || playlistsAttemptedRef.current) return
-    playlistsAttemptedRef.current = true
-    setPlaylistsLoading(true)
-    setPlaylistsError(null)
-    api.playlists(channel.channel_id).then((res) => {
-      setPlaylistsLoading(false)
-      if (!res.ok) {
-        setPlaylistsError(res.error || 'Failed to load playlists')
-        return
-      }
-      setPlaylists(res.data?.playlists ?? [])
-    })
+    if (!onSelectionChange) return
+    const plCount = playlists
+      .filter((playlist) => selectedPlaylistIds.has(playlist.id))
+      .reduce((sum, playlist) => sum + playlist.video_count, 0)
+    onSelectionChange(selectedIds.size + plCount)
+  }, [selectedIds, selectedPlaylistIds, playlists, onSelectionChange])
+
+  useEffect(() => {
+    if (tab === 'playlists' && !playlistsAttemptedRef.current) {
+      playlistsAttemptedRef.current = true
+      setPlaylistsLoading(true)
+      setPlaylistsError(null)
+      void api.playlists(channel.channel_id).then((res) => {
+        setPlaylistsLoading(false)
+        if (!res.ok) {
+          setPlaylistsError(res.error || 'Failed to load playlists')
+          return
+        }
+        setPlaylists(res.data?.playlists ?? [])
+      })
+    }
+    if (tab === 'shorts' && !shortsAttemptedRef.current) {
+      shortsAttemptedRef.current = true
+      void api.videoPage(channel.channel_id, 'shorts', 0, PAGE_SIZE).then((res) => {
+        if (!res.ok || !res.data) return
+        setShortVideos(res.data.videos)
+        setShortHasMore(res.data.has_more)
+        setShortTotal(res.data.total)
+      })
+    }
   }, [tab, channel.channel_id])
 
-  const longVideos = videos.filter((video) => !video.is_short)
-  const shortVideos = videos.filter((video) => video.is_short)
-  const subset = tab === 'shorts' ? shortVideos : longVideos
-  const selectedLongCount = longVideos.filter((video) => selectedIds.has(video.id)).length
-  const selectedShortCount = shortVideos.filter((video) => selectedIds.has(video.id)).length
+  const loadMore = async () => {
+    setLoadingMore(true)
+    if (tab === 'videos') {
+      const res = await api.videoPage(channel.channel_id, 'videos', longVideos.length, PAGE_SIZE)
+      if (res.ok && res.data) {
+        setLongVideos((prev) => [...prev, ...res.data!.videos])
+        setLongHasMore(res.data.has_more)
+      }
+    } else if (tab === 'shorts') {
+      const res = await api.videoPage(channel.channel_id, 'shorts', shortVideos.length, PAGE_SIZE)
+      if (res.ok && res.data) {
+        setShortVideos((prev) => [...prev, ...res.data!.videos])
+        setShortHasMore(res.data.has_more)
+      }
+    }
+    setLoadingMore(false)
+  }
+
+  const longCount =
+    counts?.videos ??
+    (longTotal > 0 ? longTotal : undefined) ??
+    summary?.video_count ??
+    longVideos.length
+
   const optimisticPlaylistCount = playlists
     .filter((playlist) => selectedPlaylistIds.has(playlist.id))
     .reduce((sum, playlist) => sum + playlist.video_count, 0)
@@ -1726,141 +1821,285 @@ function VideoSelectionPanel({ channel, onRunPipeline }: { channel: ChannelMeta;
     onRunPipeline()
   }
 
-  const tabs = [
-    { id: 'videos' as const, label: 'Videos', count: longVideos.length },
-    { id: 'playlists' as const, label: 'Playlists', count: playlists.length },
-    { id: 'shorts' as const, label: 'Shorts', count: shortVideos.length },
-  ]
-
   if (loading) {
     return <WorkspaceLoading label="Loading library" />
   }
 
-  return (
-    <div className="studio-scroll">
-      <div className="studio-panel">
-        <div className="studio-panel-head">
-          <div>
-            <div className="studio-eyebrow">Choose videos</div>
-            <h2>{channel.channel_name}</h2>
-            <p>Select the slice to profile. Playlists expand into videos when the pipeline starts.</p>
-          </div>
-          <div className="studio-selection-stats">
-            <span><b>{selectedLongCount}</b> videos</span>
-            <span><b>{selectedShortCount}</b> shorts</span>
-            <span><b>{selectedPlaylistIds.size}</b> playlists</span>
-          </div>
-        </div>
+  const handle = channel.channel_handle ? (channel.channel_handle.startsWith('@') ? channel.channel_handle : `@${channel.channel_handle}`) : null
+  const youtubeUrl = handle
+    ? `https://www.youtube.com/${handle}`
+    : `https://www.youtube.com/channel/${channel.channel_id}`
+  const lastUpload = longVideos[0]?.upload_date
+  const estMin = Math.max(1, Math.ceil(optimisticTotal * 0.1))
+  const tabs = [
+    { id: 'videos' as const, label: 'Videos' },
+    { id: 'playlists' as const, label: 'Playlists' },
+    { id: 'shorts' as const, label: 'Shorts' },
+  ]
+  const subset = tab === 'shorts' ? shortVideos : longVideos
 
-        <div className="studio-tabs">
-          {tabs.map((item) => (
-            <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
-              {item.label} <span>{item.count}</span>
-            </button>
-          ))}
-          <div className="studio-tabs-spacer" />
-          {tab !== 'playlists' && subset.length > 0 && (
-            <div className="studio-quick-actions">
-              <button type="button" onClick={() => replaceSubsetSelection(subset, new Set(subset.map((video) => video.id).slice(0, MAX_SELECTION)))}>All</button>
-              <button type="button" onClick={() => replaceSubsetSelection(subset, new Set())}>None</button>
-              <button type="button" onClick={() => replaceSubsetSelection(subset, new Set(subset.slice(-50).map((video) => video.id)))}>Last 50</button>
+  return (
+    <>
+      <div className={`studio-scroll${hasSelection ? ' has-runbar' : ''}`}>
+        <div className="state-card">
+          <div className="studio-vids-channel">
+            {channel.avatar_url ? (
+              <img src={channel.avatar_url} alt="" className="studio-vids-channel-av" />
+            ) : (
+              <div className="studio-vids-channel-av-fallback">{initials(channel.channel_name)}</div>
+            )}
+            <div className="studio-vids-channel-body">
+              <div className="studio-vids-channel-row">
+                <span className="studio-vids-channel-name">{channel.channel_name}</span>
+                {handle && <span className="studio-vids-channel-handle">{handle}</span>}
+              </div>
+              {lastUpload && (
+                <div className="studio-vids-channel-meta">
+                  <span>Last upload <b>{formatRelativeDate(lastUpload)}</b></span>
+                </div>
+              )}
             </div>
+            <a className="studio-vids-channel-link" href={youtubeUrl} target="_blank" rel="noreferrer noopener">
+              <Icons.Ext /> View on YouTube
+            </a>
+          </div>
+
+          <div className="studio-vids-tabs" role="tablist">
+            {tabs.map((item) => (
+              <button
+                key={item.id}
+                role="tab"
+                aria-selected={tab === item.id}
+                className={`studio-vids-tab${tab === item.id ? ' is-active' : ''}`}
+                onClick={() => setTab(item.id)}
+              >
+                <span className="studio-vids-tab-label">{item.label}</span>
+              </button>
+            ))}
+            <div className="studio-vids-tabs-spacer" />
+            {tab !== 'playlists' && subset.length > 0 && (
+              <div className="studio-vids-quick">
+                <button type="button" onClick={() => replaceSubsetSelection(subset, new Set(subset.map((video) => video.id).slice(0, MAX_SELECTION)))}>All</button>
+                <button type="button" onClick={() => replaceSubsetSelection(subset, new Set())}>None</button>
+                <button type="button" onClick={() => replaceSubsetSelection(subset, new Set(subset.slice(0, 50).map((video) => video.id)))}>First 50</button>
+              </div>
+            )}
+          </div>
+
+          {tab === 'videos' && (
+            <>
+              <div className="state-card-head" style={{ marginTop: 14, marginBottom: 10 }}>
+                <div>
+                  <div className="state-card-title">
+                    <Icons.Evidence /> Choose videos to trace
+                  </div>
+                  <div className="state-card-sub">
+                    Select the slice you want profiled — or run the full pipeline.
+                  </div>
+                </div>
+              </div>
+              <VidGrid videos={longVideos} selectedIds={selectedIds} onToggle={toggleVideo} />
+              {longHasMore && (
+                <div className="studio-vids-loadmore">
+                  <button type="button" onClick={loadMore} disabled={loadingMore}>
+                    {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'shorts' && (
+            <>
+              <div className="state-card-head" style={{ marginTop: 14, marginBottom: 10 }}>
+                <div>
+                  <div className="state-card-title">
+                    <Icons.Evidence /> Choose shorts to trace
+                  </div>
+                  <div className="state-card-sub">
+                    Pick a slice — or run the long-form pipeline.
+                  </div>
+                </div>
+              </div>
+              {shortVideos.length === 0 ? (
+                <div className="studio-empty-state">No Shorts found.</div>
+              ) : (
+                <ShortsGrid videos={shortVideos} selectedIds={selectedIds} onToggle={toggleVideo} />
+              )}
+              {shortHasMore && (
+                <div className="studio-vids-loadmore">
+                  <button type="button" onClick={loadMore} disabled={loadingMore}>
+                    {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'playlists' && (
+            <>
+              <div className="state-card-head" style={{ marginTop: 14, marginBottom: 10 }}>
+                <div>
+                  <div className="state-card-title">
+                    <Icons.Evidence /> Add playlists
+                  </div>
+                  <div className="state-card-sub">
+                    Selected playlists expand into their videos when the pipeline starts.
+                  </div>
+                </div>
+              </div>
+              {playlistsLoading ? (
+                <WorkspaceLoading label="Loading playlists" compact />
+              ) : playlistsError ? (
+                <div className="studio-empty-state danger">{playlistsError}</div>
+              ) : playlists.length === 0 ? (
+                <div className="studio-empty-state">No public playlists found.</div>
+              ) : (
+                <div className="studio-vids-playlists">
+                  {playlists.map((playlist) => {
+                    const selected = selectedPlaylistIds.has(playlist.id)
+                    return (
+                      <button
+                        key={playlist.id}
+                        type="button"
+                        className={`studio-vids-pl${selected ? ' is-selected' : ''}`}
+                        onClick={() => {
+                          setSelectedPlaylistIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(playlist.id)) next.delete(playlist.id)
+                            else next.add(playlist.id)
+                            return next
+                          })
+                        }}
+                      >
+                        <div className="studio-vids-pl-thumb-wrap">
+                          {playlist.thumbnail ? (
+                            <img className="studio-vids-pl-thumb" src={playlist.thumbnail} alt="" loading="lazy" />
+                          ) : (
+                            <div className="studio-vids-pl-thumb" />
+                          )}
+                          <span className="studio-vids-pl-count">
+                            <Icons.Play /> {playlist.video_count.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="studio-vids-pl-body">
+                          <div className="studio-vids-pl-title">{playlist.title}</div>
+                          <div className="studio-vids-pl-meta">{playlist.video_count.toLocaleString()} videos</div>
+                        </div>
+                        <div className="vid-check">{selected && <Icons.Check />}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
-
-        {tab === 'videos' && <VideoGrid videos={longVideos} selectedIds={selectedIds} onToggle={toggleVideo} />}
-        {tab === 'shorts' && <VideoGrid videos={shortVideos} selectedIds={selectedIds} onToggle={toggleVideo} short />}
-        {tab === 'playlists' && (
-          playlistsLoading ? (
-            <WorkspaceLoading label="Loading playlists" compact />
-          ) : playlistsError ? (
-            <div className="studio-empty-state danger">{playlistsError}</div>
-          ) : playlists.length === 0 ? (
-            <div className="studio-empty-state">No public playlists found.</div>
-          ) : (
-            <div className="studio-playlist-grid">
-              {playlists.map((playlist) => {
-                const selected = selectedPlaylistIds.has(playlist.id)
-                return (
-                  <button
-                    key={playlist.id}
-                    type="button"
-                    className={`studio-playlist-card ${selected ? 'selected' : ''}`}
-                    onClick={() => {
-                      setSelectedPlaylistIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(playlist.id)) next.delete(playlist.id)
-                        else next.add(playlist.id)
-                        return next
-                      })
-                    }}
-                  >
-                    <span className="studio-playlist-thumb">
-                      {playlist.thumbnail ? <img src={playlist.thumbnail} alt="" /> : <Icons.Filter />}
-                    </span>
-                    <span>
-                      <b>{playlist.title}</b>
-                      <small>{playlist.video_count} videos</small>
-                    </span>
-                    <span className="studio-card-check">{selected && <Icons.Check />}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )
-        )}
       </div>
 
-      <div className="studio-runbar">
-        <div>
-          <span>Selected</span>
-          <b>{optimisticTotal.toLocaleString()}</b>
-          {saving && <small>Saving...</small>}
-          {optimisticTotal > MAX_SELECTION && <small className="warn">{MAX_SELECTION}+ videos may be slow and expensive</small>}
-          {runError && <small className="danger">{runError}</small>}
+      <div className={`studio-vids-runbar${hasSelection ? ' is-visible' : ''}`} aria-hidden={!hasSelection}>
+        <div className="studio-vids-runbar-inner">
+          <div className="counts">
+            <b>{optimisticTotal.toLocaleString()}</b> videos selected
+            {optimisticTotal > 0 && <span>· est. <b>~{estMin} min</b></span>}
+            {saving && <span className="saving">saving…</span>}
+            {optimisticTotal > MAX_SELECTION && <span className="warn">{MAX_SELECTION}+ may be slow</span>}
+            {runError && <span className="warn">{runError}</span>}
+          </div>
+          <div className="studio-vids-runbar-actions">
+            <button type="button" className="btn-primary-sm" disabled={!hasSelection || resolvingPlaylists} onClick={handleRun}>
+              {resolvingPlaylists ? <span className="studio-spinner" /> : null}
+              Transcript <Icons.Arrow />
+            </button>
+          </div>
         </div>
-        <button type="button" className="studio-btn primary" disabled={!hasSelection || resolvingPlaylists} onClick={handleRun}>
-          {resolvingPlaylists ? <span className="studio-spinner" /> : <Icons.Arrow />}
-          Run pipeline
-        </button>
       </div>
-    </div>
+    </>
   )
 }
 
-function VideoGrid({
+function VidGrid({
   videos,
   selectedIds,
   onToggle,
-  short = false,
 }: {
   videos: Video[]
   selectedIds: Set<string>
   onToggle: (id: string) => void
-  short?: boolean
 }) {
   if (videos.length === 0) {
-    return <div className="studio-empty-state">{short ? 'No Shorts found.' : 'No long-form videos found.'}</div>
+    return <div className="studio-empty-state">No long-form videos found.</div>
   }
-
   return (
-    <div className={`studio-video-grid ${short ? 'shorts' : ''}`}>
+    <div className="vidgrid">
       {videos.map((video) => {
         const selected = selectedIds.has(video.id)
         return (
-          <button key={video.id} type="button" className={`studio-video-card ${selected ? 'selected' : ''}`} onClick={() => onToggle(video.id)}>
-            <span className="studio-video-thumb">
+          <button key={video.id} type="button" className={`vid${selected ? ' sel' : ''}`} onClick={() => onToggle(video.id)}>
+            <div className="vid-thumb">
               <img src={video.thumbnail} alt="" loading="lazy" />
-              <span>{formatDuration(video.duration)}</span>
-            </span>
-            <span className="studio-video-title">{video.title}</span>
-            <span className="studio-video-meta">{formatRelativeDate(video.upload_date)}</span>
-            <span className="studio-card-check">{selected && <Icons.Check />}</span>
+              {video.duration > 0 && <span className="dur">{formatDuration(video.duration)}</span>}
+            </div>
+            <div>
+              <div className="vid-title">{video.title}</div>
+              <div className="vid-meta">{formatRelativeDate(video.upload_date)}</div>
+            </div>
+            <div className="vid-check">{selected && <Icons.Check />}</div>
           </button>
         )
       })}
     </div>
   )
+}
+
+function ShortsGrid({
+  videos,
+  selectedIds,
+  onToggle,
+}: {
+  videos: Video[]
+  selectedIds: Set<string>
+  onToggle: (id: string) => void
+}) {
+  return (
+    <div className="studio-vids-shorts">
+      {videos.map((video) => {
+        const selected = selectedIds.has(video.id)
+        return (
+          <button
+            key={video.id}
+            type="button"
+            className={`studio-vids-short${selected ? ' is-selected' : ''}`}
+            onClick={() => onToggle(video.id)}
+          >
+            <div className="studio-vids-short-thumb">
+              <img src={video.thumbnail} alt="" loading="lazy" />
+              {video.view_count > 0 && (
+                <span className="studio-vids-short-views">
+                  {video.view_count >= 1_000_000
+                    ? `${(video.view_count / 1_000_000).toFixed(1)}M`
+                    : video.view_count >= 1_000
+                      ? `${(video.view_count / 1_000).toFixed(0)}K`
+                      : video.view_count.toLocaleString()}
+                </span>
+              )}
+              <span className="studio-vids-short-check">{selected && <Icons.Check />}</span>
+            </div>
+            <div className="studio-vids-short-title">{video.title}</div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const STATUS_PILL: Record<string, { cls: string; label: string }> = {
+  done: { cls: 'is-done', label: 'Done' },
+  failed: { cls: 'is-failed', label: 'Failed' },
+  unavailable: { cls: 'is-unavail', label: 'Unavailable' },
+  skipped: { cls: 'is-skipped', label: 'Skipped' },
+  queued: { cls: 'is-queued', label: 'Queued' },
+  fetching: { cls: 'is-fetching', label: 'Running' },
 }
 
 function ProgressPanel({
@@ -1870,6 +2109,7 @@ function ProgressPanel({
   isError,
   onBackToVideos,
   onProfileReady,
+  onSwitchToSummaries,
 }: {
   channel: ChannelMeta
   stage: 'transcripts' | 'summaries'
@@ -1877,12 +2117,16 @@ function ProgressPanel({
   isError: boolean
   onBackToVideos: () => void
   onProfileReady: () => void
+  onSwitchToSummaries: () => void
 }) {
   const [baseVideos, setBaseVideos] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
   const [cost, setCost] = useState<PipelineCost | null>(null)
   const [controlError, setControlError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [resuming, setResuming] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1914,23 +2158,160 @@ function ProgressPanel({
 
   const stageState = pipeline?.stages?.[stage]
   const statusMap = stageState?.videos ?? {}
-  const rows = baseVideos.map((video) => ({
-    video,
-    status: typeof statusMap[video.id]?.status === 'string' ? statusMap[video.id].status : 'queued',
-  }))
-  const terminalStatuses = stage === 'transcripts'
-    ? new Set(['done', 'skipped', 'unavailable', 'failed'])
-    : new Set(['done', 'skipped', 'failed'])
-  const completed = rows.filter((row) => terminalStatuses.has(row.status)).length
-  const done = rows.filter((row) => row.status === 'done').length
-  const failed = rows.filter((row) => row.status === 'failed').length
-  const progress = rows.length > 0 ? Math.round((completed / rows.length) * 100) : 0
+  const videoMetaMap = useMemo(() => {
+    const map = new Map<string, { title: string; thumbnail: string; duration: number }>()
+    for (const v of baseVideos) {
+      map.set(v.id, { title: v.title, thumbnail: v.thumbnail, duration: v.duration })
+    }
+    return map
+  }, [baseVideos])
+
+  const terminalStatuses = useMemo(
+    () =>
+      stage === 'transcripts'
+        ? new Set(['done', 'skipped', 'unavailable', 'failed'])
+        : new Set(['done', 'skipped', 'failed']),
+    [stage],
+  )
+
+  type Row = {
+    id: string
+    idx: number
+    title: string
+    thumbnail: string
+    duration: number
+    status: string
+    subPct?: number
+    subLabel: string
+  }
+
+  const rows: Row[] = useMemo(() => {
+    const base = baseVideos.length > 0
+      ? baseVideos.map((video, i) => ({
+          id: video.id,
+          idx: i + 1,
+          title: video.title,
+          thumbnail: video.thumbnail,
+          duration: video.duration,
+          status: typeof statusMap[video.id]?.status === 'string' ? (statusMap[video.id].status as string) : 'queued',
+        }))
+      : Object.entries(statusMap).map(([id, vstate], i) => ({
+          id,
+          idx: i + 1,
+          title: typeof vstate.title === 'string' ? vstate.title : 'Untitled',
+          thumbnail: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+          duration: 0,
+          status: typeof vstate.status === 'string' ? vstate.status : 'queued',
+        }))
+    let fetchIdx = 0
+    return base.map((r) => {
+      let subLabel = 'Queued'
+      let subPct: number | undefined
+      if (r.status === 'fetching') {
+        subLabel = stage === 'summaries' ? 'Synthesizing themes' : 'Transcribing (ASR)'
+        subPct = [62, 34, 9][fetchIdx] ?? 12
+        fetchIdx += 1
+      } else if (r.status === 'done') {
+        subLabel = stage === 'summaries' ? 'Summarized' : (r.duration > 0 ? formatDuration(r.duration) : 'Done')
+      } else if (r.status === 'failed') {
+        subLabel = 'Failed'
+      } else if (r.status === 'unavailable') {
+        subLabel = 'No transcript'
+      } else if (r.status === 'skipped') {
+        subLabel = 'Skipped'
+      }
+      return { ...r, subLabel, subPct }
+    })
+  }, [baseVideos, statusMap, stage])
+
+  const videoStats = useMemo(() => {
+    let done = 0
+    let failed = 0
+    let unavail = 0
+    let fetching = 0
+    let completed = 0
+    for (const v of Object.values(statusMap)) {
+      const status = typeof v.status === 'string' ? v.status : ''
+      if (status === 'done') done += 1
+      else if (status === 'failed') failed += 1
+      else if (status === 'unavailable') unavail += 1
+      else if (status === 'fetching') fetching += 1
+      if (terminalStatuses.has(status)) completed += 1
+    }
+    return { done, failed, unavail, fetching, completed }
+  }, [statusMap, terminalStatuses])
+
+  const total = stageState?.total ?? rows.length
+  const completed = stageState?.completed ?? videoStats.completed
+  const { done, failed, unavail, fetching } = videoStats
+  const queued = Math.max(0, total - completed - fetching)
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+  const seg = {
+    done: total > 0 ? (done / total) * 100 : 0,
+    failed: total > 0 ? (failed / total) * 100 : 0,
+    unavail: total > 0 ? (unavail / total) * 100 : 0,
+    fetching: total > 0 ? (fetching / total) * 100 : 0,
+  }
   const runId = typeof pipeline?.run_id === 'string' ? pipeline.run_id : null
-  const awaitingSummaryConfirm = stage === 'summaries' && pipeline?.status === 'awaiting_confirm_summaries'
+  const pipelineStatus = pipeline?.status
+  const currentStage = pipeline?.current_stage
+  const hasSummarizableTranscript = useMemo(
+    () => Object.values(statusMap).some((v) => v.status === 'done' || v.status === 'skipped'),
+    [statusMap],
+  )
+  const transcriptsRunning =
+    (pipelineStatus === 'running' || pipelineStatus === 'queued') &&
+    (currentStage === 'transcripts' || currentStage === 'chunks')
+  const summariesRunning =
+    (pipelineStatus === 'running' || pipelineStatus === 'queued') &&
+    (currentStage === 'summaries' || currentStage === 'profile')
+  const transcriptsHalted =
+    pipelineStatus === 'cancelled' ||
+    (pipelineStatus === 'failed' && (currentStage === 'transcripts' || currentStage === 'chunks'))
+  const transcriptStageProgress = !!pipeline?.stages?.transcripts
+  const summariesAlreadyStarted = !!pipeline?.stages?.summaries
+  const transcriptsNeverStarted =
+    !pipelineStatus ||
+    pipelineStatus === 'idle' ||
+    (!transcriptStageProgress && !hasSummarizableTranscript)
+  const showStartGate =
+    stage === 'transcripts' &&
+    !transcriptsRunning &&
+    pipelineStatus !== 'awaiting_confirm_summaries' &&
+    (transcriptsNeverStarted || (transcriptsHalted && !hasSummarizableTranscript))
+  const canSummarize =
+    pipelineStatus === 'awaiting_confirm_summaries' ||
+    (hasSummarizableTranscript && transcriptsHalted)
+  const showSummarizeFromTranscripts =
+    stage === 'transcripts' && !showStartGate && !transcriptsRunning && canSummarize
+  const showResumeTranscriptsBtn =
+    stage === 'transcripts' && transcriptsHalted && hasSummarizableTranscript
+  const showCostGate =
+    stage === 'summaries' &&
+    !summariesRunning &&
+    !summariesAlreadyStarted &&
+    hasSummarizableTranscript &&
+    (pipelineStatus === 'awaiting_confirm_summaries' ||
+      pipelineStatus === 'cancelled' ||
+      pipelineStatus === 'failed')
+  const partialTranscripts = transcriptsHalted && hasSummarizableTranscript
+  const activeRows = rows.filter((r) => r.status === 'fetching')
+  const extraActive = Math.max(0, activeRows.length - 3)
+  const etaMin = stage === 'transcripts' ? 4 : 6
 
   const handleCancel = async () => {
+    if (!window.confirm('Cancel the pipeline run?')) return
+    setCancelling(true)
     await api.pipelineCancel(channel.channel_id)
-    onBackToVideos()
+    setCancelling(false)
+  }
+
+  const handleStart = async () => {
+    setStarting(true)
+    setControlError(null)
+    const res = await api.pipelineStart(channel.channel_id)
+    setStarting(false)
+    if (!res.ok) setControlError(res.error || 'Could not start transcription.')
   }
 
   const handleRetryFailed = async () => {
@@ -1942,14 +2323,14 @@ function ProgressPanel({
     setControlError(null)
     const res = await api.retryFailed(runId)
     setRetrying(false)
-    if (!res.ok) {
-      setControlError(res.error || 'Retry failed.')
-    }
+    if (!res.ok) setControlError(res.error || 'Retry failed.')
   }
 
   const handleResume = async () => {
+    setResuming(true)
     setControlError(null)
     const res = await api.pipelineResume(channel.channel_id)
+    setResuming(false)
     if (!res.ok) setControlError(res.error || 'Could not start summaries.')
   }
 
@@ -1964,68 +2345,259 @@ function ProgressPanel({
           <div className="studio-error-card">
             <Icons.Warn />
             <div>
-              <b>Pipeline step failed.</b>
-              <p>{pipeline?.error || 'Some videos could not be processed. Retry the failed batch or return to video selection.'}</p>
+              <b>{stage === 'transcripts' ? 'Transcripts' : 'Summaries'} step failed.</b>
+              <p>{pipeline?.error || `${failed} videos could not be processed. Retry the failed batch or return to video selection.`}</p>
             </div>
-            <button type="button" className="studio-btn primary" disabled={retrying || !runId} onClick={handleRetryFailed}>
+            <button type="button" className="btn-primary-sm" disabled={retrying || !runId} onClick={handleRetryFailed}>
               {retrying ? <span className="studio-spinner" /> : <Icons.Refresh />}
-              Retry failed
+              Retry {failed > 0 ? `${failed} failed` : 'batch'}
             </button>
           </div>
         )}
 
-        <div className="studio-panel-head">
-          <div>
-            <div className="studio-eyebrow">{stage === 'transcripts' ? 'Transcripts' : 'Summaries'}</div>
-            <h2>{stage === 'transcripts' ? 'Fetching transcripts' : 'Synthesizing profile'}</h2>
-            <p>
-              {stage === 'transcripts'
-                ? 'Fetching captions and marking unavailable videos as they complete.'
-                : 'Distilling transcripts into themes, claims, tone, and evidence.'}
-            </p>
-          </div>
-          <button type="button" className="studio-btn secondary danger" onClick={handleCancel}>Cancel</button>
-        </div>
-
-        {awaitingSummaryConfirm && cost && (
-          <div className="studio-cost-card">
-            <div>
-              <b>Start summaries</b>
-              <p>
-                Estimated ${cost.estimated_cost_usd.toFixed(2)} for {Math.ceil(cost.estimated_transcript_seconds / 60).toLocaleString()} transcript minutes across {cost.video_count} videos.
+        <div className="studio-progress-panel">
+          <div className="studio-progress-head">
+            <div className="studio-progress-head-text">
+              <div className="studio-progress-eyebrow">
+                <span className="studio-progress-eyebrow-mark" aria-hidden />
+                {stage === 'transcripts' ? 'Transcripts' : 'Summaries'}
+              </div>
+              <h2 className="studio-progress-title">
+                {showStartGate
+                  ? 'Ready to transcribe.'
+                  : showCostGate
+                    ? 'Ready to synthesize.'
+                    : stage === 'transcripts'
+                      ? transcriptsHalted
+                        ? 'Transcription stopped.'
+                        : 'Fetching captions and falling back to ASR.'
+                      : 'Distilling each transcript into themes.'}
+              </h2>
+              <p className="studio-progress-blurb">
+                {showStartGate
+                  ? 'Captions are pulled from YouTube when available, with automatic transcription as fallback. You can cancel any time.'
+                  : showCostGate
+                    ? partialTranscripts
+                      ? 'Transcription was stopped before finishing. Only videos with completed transcripts will be summarized.'
+                      : 'Transcripts are ready. Summaries will turn each one into themes, claims, tone, and evidence — cited back to source.'
+                    : stage === 'transcripts'
+                      ? transcriptsHalted
+                        ? hasSummarizableTranscript
+                          ? 'Some videos finished, others did not. Resume to fetch the rest, or jump to summaries with what you have.'
+                          : 'No transcripts completed. Restart to fetch them.'
+                        : "Each video gets its caption track when available, then automatic transcription where YouTube doesn't expose one."
+                      : 'Synthesis is incremental — answers in chat get smarter as each summary lands.'}
               </p>
             </div>
-            <button type="button" className="studio-btn primary" onClick={handleResume}>
-              Start summaries
-            </button>
+            {transcriptsRunning && stage === 'transcripts' && (
+              <button type="button" className="studio-progress-cancel" onClick={handleCancel} disabled={cancelling}>
+                {cancelling ? 'Cancelling…' : 'Cancel run'}
+              </button>
+            )}
+            {summariesRunning && stage === 'summaries' && !showCostGate && (
+              <button type="button" className="studio-progress-cancel" onClick={handleCancel} disabled={cancelling}>
+                {cancelling ? 'Cancelling…' : 'Cancel run'}
+              </button>
+            )}
           </div>
-        )}
 
-        {cost && !awaitingSummaryConfirm && (
-          <div className="studio-cost-line">
-            Est. ${cost.estimated_cost_usd.toFixed(2)} · {Math.ceil(cost.estimated_transcript_seconds / 60).toLocaleString()} transcript minutes · {cost.video_count} videos
-          </div>
-        )}
+          {controlError && <div className="studio-form-error">{controlError}</div>}
 
-        {controlError && <div className="studio-form-error">{controlError}</div>}
-
-        <div className="studio-progress-strip">
-          <div><b>{done}</b><span>done</span></div>
-          <div><b>{failed}</b><span>failed</span></div>
-          <div><b>{completed}</b><span>complete</span></div>
-          <div><b>{rows.length}</b><span>total</span></div>
-        </div>
-        <div className="studio-progress-bar"><span style={{ width: `${progress}%` }} /></div>
-
-        <div className="studio-work-list">
-          {rows.map(({ video, status: rowStatus }, index) => (
-            <div key={video.id} className={`studio-work-row ${rowStatus}`}>
-              <span>{String(index + 1).padStart(2, '0')}</span>
-              <img src={video.thumbnail} alt="" />
-              <b>{video.title}</b>
-              <small>{rowStatus === 'fetching' ? (stage === 'transcripts' ? 'Fetching...' : 'Summarizing...') : rowStatus}</small>
+          {showStartGate ? (
+            <div className="studio-cost-gate">
+              <div className="studio-cost-eyebrow">
+                <span className="studio-cost-eyebrow-dot" aria-hidden />
+                Confirm to proceed · transcripts
+              </div>
+              <h3 className="studio-cost-title">Transcription is free but takes time.</h3>
+              <p className="studio-cost-blurb">
+                We pull YouTube captions when available, then fall back to automatic transcription for the rest. You can cancel mid-run; finished transcripts are kept.
+              </p>
+              <div className="studio-cost-actions">
+                <button type="button" className="btn-secondary-sm" onClick={onBackToVideos}>Back to videos</button>
+                <button type="button" className="studio-cost-cta" onClick={handleStart} disabled={starting}>
+                  {starting ? <span className="studio-spinner" /> : null}
+                  Start transcription <Icons.Arrow />
+                </button>
+              </div>
             </div>
-          ))}
+          ) : showCostGate && cost ? (
+            <div className="studio-cost-gate">
+              <div className="studio-cost-eyebrow">
+                <span className="studio-cost-eyebrow-dot" aria-hidden />
+                Confirm to proceed · summaries
+              </div>
+              <h3 className="studio-cost-title">Summaries cost money to generate.</h3>
+              <p className="studio-cost-blurb">
+                Each transcript is sent to the model for theme, claim, and tone synthesis. You can cancel mid-run, but spent minutes don't refund.
+              </p>
+              <div className="studio-cost-grid">
+                <div className="studio-cost-cell">
+                  <div className="studio-cost-num">${cost.estimated_cost_usd.toFixed(2)}</div>
+                  <div className="studio-cost-key">Estimated</div>
+                </div>
+                <div className="studio-cost-cell">
+                  <div className="studio-cost-num">{Math.ceil(cost.estimated_transcript_seconds / 60)}<span>m</span></div>
+                  <div className="studio-cost-key">Transcript</div>
+                </div>
+                <div className="studio-cost-cell">
+                  <div className="studio-cost-num">{cost.video_count}</div>
+                  <div className="studio-cost-key">Videos</div>
+                </div>
+              </div>
+              <div className="studio-cost-actions">
+                <button type="button" className="btn-secondary-sm" onClick={onBackToVideos}>Back to videos</button>
+                <button type="button" className="studio-cost-cta" onClick={handleResume} disabled={resuming}>
+                  {resuming ? <span className="studio-spinner" /> : null}
+                  Start summaries <Icons.Arrow />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="studio-progress-headline">
+                <div className="studio-progress-counter">
+                  <span className="studio-progress-counter-done">{completed}</span>
+                  <span className="studio-progress-counter-sep">/</span>
+                  <span className="studio-progress-counter-total">{total}</span>
+                  <span className="studio-progress-counter-pct">{pct}<i>%</i></span>
+                </div>
+
+                <div className="studio-progress-meter" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                  {seg.done > 0     && <span className="studio-progress-seg is-done"     style={{ width: `${seg.done}%` }} />}
+                  {seg.failed > 0   && <span className="studio-progress-seg is-failed"   style={{ width: `${seg.failed}%` }} />}
+                  {seg.unavail > 0  && <span className="studio-progress-seg is-unavail"  style={{ width: `${seg.unavail}%` }} />}
+                  {seg.fetching > 0 && <span className="studio-progress-seg is-fetching" style={{ width: `${seg.fetching}%` }} />}
+                </div>
+
+                <div className="studio-progress-legend">
+                  <span className="studio-progress-leg-item">
+                    <span className="studio-progress-leg-sw is-done" /><b>{done}</b> done
+                  </span>
+                  {failed > 0 && (
+                    <span className="studio-progress-leg-item">
+                      <span className="studio-progress-leg-sw is-failed" /><b>{failed}</b> failed
+                    </span>
+                  )}
+                  {unavail > 0 && (
+                    <span className="studio-progress-leg-item">
+                      <span className="studio-progress-leg-sw is-unavail" /><b>{unavail}</b> unavailable
+                    </span>
+                  )}
+                  <span className="studio-progress-leg-item">
+                    <span className="studio-progress-leg-sw is-fetching" /><b>{fetching}</b> running
+                  </span>
+                  <span className="studio-progress-leg-item is-muted">
+                    <span className="studio-progress-leg-sw is-queued" /><b>{queued}</b> queued
+                  </span>
+                  <span className="studio-progress-leg-spacer" />
+                  {failed > 0 && runId && (
+                    <button className="studio-progress-leg-action" type="button" onClick={handleRetryFailed} disabled={retrying}>
+                      <Icons.Refresh /> Retry {failed} failed
+                    </button>
+                  )}
+                  {fetching > 0 && (
+                    <span className="studio-progress-leg-eta">
+                      ETA <b>~{etaMin} min</b>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {fetching > 0 && (
+                <div className="studio-progress-now">
+                  <div className="studio-progress-section-head">
+                    <span className="studio-progress-section-eyebrow">Now processing</span>
+                    <span className="studio-progress-section-meta">
+                      <span className="studio-progress-pulse" aria-hidden />
+                      {fetching} active
+                    </span>
+                  </div>
+                  <div className="studio-progress-now-rows">
+                    {activeRows.slice(0, 3).map((row) => (
+                      <div key={row.id} className="studio-progress-now-row">
+                        <img src={row.thumbnail} alt="" loading="lazy" />
+                        <div className="studio-progress-now-body">
+                          <div className="studio-progress-now-title">{row.title}</div>
+                          <div className="studio-progress-now-sub">
+                            <span className="studio-progress-now-dot" aria-hidden />
+                            {row.subLabel}{row.subPct !== undefined ? ` · ${row.subPct}%` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {extraActive > 0 && (
+                    <div className="studio-progress-now-more">+{extraActive} more in flight</div>
+                  )}
+                </div>
+              )}
+
+              <div className="studio-work">
+                <div className="studio-progress-section-head">
+                  <span className="studio-progress-section-eyebrow">Timeline</span>
+                  <span className="studio-progress-section-meta studio-work-head-meta">
+                    <span>{completed} of {total}</span>
+                    <span className="studio-work-head-sep" />
+                    <span>scroll</span>
+                  </span>
+                </div>
+                <div className="studio-work-list">
+                  {rows.map((r) => {
+                    const pill = STATUS_PILL[r.status] ?? STATUS_PILL.queued
+                    return (
+                      <div key={r.id} className={`studio-work-row is-${r.status}`}>
+                        <span className="studio-work-idx">{String(r.idx).padStart(2, '0')}</span>
+                        <img src={r.thumbnail} alt="" loading="lazy" />
+                        <span className="studio-work-title">{r.title}</span>
+                        <span className="studio-work-sub">{r.subLabel}</span>
+                        <span className={`studio-work-pill ${pill.cls}`}>
+                          <span className="studio-work-pill-dot" />
+                          {pill.label}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {(showSummarizeFromTranscripts || showResumeTranscriptsBtn) && (
+                <div className="studio-cost-actions">
+                  {showResumeTranscriptsBtn && (
+                    <button type="button" className="btn-secondary-sm" onClick={handleStart} disabled={starting}>
+                      {starting ? <span className="studio-spinner" /> : null}
+                      Resume transcription
+                    </button>
+                  )}
+                  {showSummarizeFromTranscripts && (
+                    <button type="button" className="studio-cost-cta" onClick={onSwitchToSummaries}>
+                      {partialTranscripts ? 'Summarize what we have ' : 'Summarize '}<Icons.Arrow />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="studio-progress-foot">
+                {cost && (
+                  <>
+                    <span className="studio-progress-foot-key">Run cost so far</span>
+                    <span className="studio-progress-foot-val">
+                      ${(cost.estimated_cost_usd * (completed / Math.max(1, total))).toFixed(2)}
+                      <i> of ${cost.estimated_cost_usd.toFixed(2)} est.</i>
+                    </span>
+                  </>
+                )}
+                <span className="studio-progress-foot-spacer" />
+                <button className="studio-progress-foot-link" type="button" onClick={onBackToVideos}>Back to videos</button>
+                {runId && (
+                  <>
+                    <span className="studio-progress-foot-sep" />
+                    <span className="studio-progress-foot-runid">{runId}</span>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

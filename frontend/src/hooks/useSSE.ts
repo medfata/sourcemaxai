@@ -11,10 +11,12 @@ export function useSSE(channelId: string | null): UseSSEReturn {
   const [state, setState] = useState<PipelineState | null>(null)
   const [connected, setConnected] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const streamSeededRef = useRef(false)
 
   useEffect(() => {
     setState(null)
     setConnected(false)
+    streamSeededRef.current = false
     if (!channelId) return
 
     const activeChannelId = channelId
@@ -24,9 +26,8 @@ export function useSSE(channelId: string | null): UseSSEReturn {
     async function loadInitialState() {
       try {
         const res = await api.pipelineState(activeChannelId)
-        if (!abort.signal.aborted && res.ok && res.data) {
-          setState(res.data)
-        }
+        if (abort.signal.aborted || streamSeededRef.current) return
+        if (res.ok && res.data) setState(res.data)
       } catch {
         // The stream still has its own initial_state event; this fetch is a fast refresh fallback.
       }
@@ -35,25 +36,9 @@ export function useSSE(channelId: string | null): UseSSEReturn {
     function applyEvent(event: string, rawData: string) {
       if (!rawData) return
       if (event === 'initial_state') {
+        streamSeededRef.current = true
         setState(JSON.parse(rawData))
         setConnected(true)
-        return
-      }
-      if (event === 'video_update') {
-        const data = JSON.parse(rawData)
-        setState((prev) => {
-          if (!prev) return prev
-          const stageId = data.stage_id || 'transcripts'
-          const stage = prev.stages?.[stageId]
-          if (!stage) return prev
-          return {
-            ...prev,
-            stages: {
-              ...prev.stages,
-              [stageId]: { ...stage, ...data.stage },
-            },
-          }
-        })
         return
       }
       if (

@@ -61,7 +61,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P5.1 | Block error surfacing in `ChannelInputPage.tsx` (proxy_bytes_limit modal) | done | P3.2 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P5.2 | Quota meter component reading `/api/quota/proxy-usage` | in_progress | P3.4 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
+| P5.2 | Quota meter component reading `/api/quota/proxy-usage` | done | P3.4 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
 | P5.3 | Per-row "retrying with rotated proxy" status in `StudioPage.tsx` | done | P3.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 | P5.4 | Tier comparison copy update (transcript bandwidth quota) | done | P5.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
@@ -78,8 +78,8 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P7.1 | `USE_PROXY_POOL` feature flag in config; default off | done | P1.4 | agent-p7.1-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
-| P7.2 | Shadow mode: log intended proxy without using it | in_progress | P7.1 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
-| P7.3 | 10% canary by `owner_id % 10 == 0` | todo | P3.1, P3.2 | | | | |
+| P7.2 | Shadow mode: log intended proxy without using it | done | P7.1 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
+| P7.3 | 10% canary by `owner_id % 10 == 0` | in_progress | P3.1, P3.2 | agent-p7-3-2026-05-15 | proxy/p7-3-canary | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/13 |
 | P7.4 | Full cutover; monitor 48h | todo | P7.3, P6.1 | | | | |
 | P7.5 | Remove direct-fetch path from `fetch_transcripts.py` | todo | P7.4 | | | | |
 
@@ -104,6 +104,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 - 2026-05-15 | main-session-2026-05-15 | Post-PR-#9/#10/#11 review pass found 10 issues; 9 fixed in commit `832604a` on PR #11 branch. Critical: owner_id was never threaded into `fetch_with_retry` so P2.5 `record_usage` was dead code; fix threads owner_id + breaker through `fetch_transcripts → _fetch_with_gate → fetch_single_transcript → fetch_with_retry`. Also hardened breaker construction (returns None on local storage instead of crashing), short-circuited fetch_with_retry on all-providers-open, locked OwnerConcurrencyGate map, plugged reconcile end-of-month filter, added tier_key to QuotaDecision detail, hoisted observability imports, removed dup logger, rendered tier in modal, skipped worker housekeeping under local storage. Status table marking tasks `done` before merge was flagged as cosmetic only; corrected at merge time during this conflict resolution.
 - 2026-05-15 | agent-p5-2-p7-2-2026-05-15 | P5.2 + P7.2 claimed together on `proxy/p5-2-p7-2-combined`, PR #12. P5.2 mounts `ProxyQuotaMeter` above the transcripts work list (no pre-existing usage strip in StudioPage); refreshKey = `${pipelineStatus}-${done}` so it re-fetches on each completion. P7.2 lives at `fetch_single_transcript` (single acquire, no retry loop) rather than inside `fetch_with_retry`, since shadow does no real proxy work. | Spec said header strip "near other usage indicators" — none existed in StudioPage, so the fallback ("above the work list") applied. Shadow at the per-video level keeps `fetch_with_retry` semantics unchanged for the real-traffic path.
 - 2026-05-15 | user-2026-05-15 | Open Question resolutions (Webshare $6/mo; hard-fail on free-tier exhaustion; drop yt-dlp tier-2). | Webshare: different ASN = real failover when IPRoyal degrades, native lib support already wired. Hard-fail: matches the existing P5.1 modal, no silent stall, avoids new queue state. yt-dlp drop: proxy pool is primary now; yt-dlp adds binary dep + ToS risk for marginal benefit. P7.3+ implementations should reflect these.
+- 2026-05-15 | agent-p7-3-2026-05-15 | P7.3 canary uses single boolean `PROXY_POOL_CANARY` (not a percentage knob) with a hard-coded 10% bucket via `int(md5(owner_id)) % 10 == 0`. Anonymous (owner_id=None) traffic stays on the direct path during canary. Mode precedence in `fetch_transcripts`: `use_proxy_pool` > canary-in-bucket > shadow > direct. Canary out-of-bucket runs **direct, not shadow** so canary results aren't muddied by shadow-mode log volume. | Plan §7 step 3 specifies `owner_id % 10 == 0` literally, not a configurable percent — flag + math match spec. md5 chosen over Python `hash()` because Python hash randomizes per-process so the same owner could flip in/out of canary across worker restarts. |
 
 ## Blocker Log
 

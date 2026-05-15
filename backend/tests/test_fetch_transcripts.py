@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+import uuid
+from types import SimpleNamespace
+
 from backend.pipeline import fetch_transcripts as fetch_transcripts_module
 from backend.pipeline.proxy_pool import ProxyConfig
 from youtube_transcript_api import IpBlocked, RequestBlocked, TranscriptsDisabled
@@ -215,6 +219,115 @@ def test_fetch_single_transcript_shadow_mode_skips_proxy_path(monkeypatch, tmp_p
     assert result["status"] == "done"
     assert pool.mark_blocked_calls == []
     assert quota_record_calls == []
+
+
+def test_owner_in_canary_bucket_is_deterministic_and_typed():
+    assert fetch_transcripts_module._owner_in_canary_bucket(None) is False
+    assert fetch_transcripts_module._owner_in_canary_bucket("") is False
+    assert fetch_transcripts_module._owner_in_canary_bucket("owner_3") is True
+    assert fetch_transcripts_module._owner_in_canary_bucket("owner_1") is False
+    assert fetch_transcripts_module._owner_in_canary_bucket("owner_3") is True
+
+
+def test_owner_in_canary_bucket_distribution_about_10_percent():
+    sample = [str(uuid.uuid4()) for _ in range(5000)]
+    in_bucket = sum(1 for oid in sample if fetch_transcripts_module._owner_in_canary_bucket(oid))
+    ratio = in_bucket / len(sample)
+    assert 0.07 < ratio < 0.13, f"expected ~10% canary share, got {ratio:.3f}"
+
+
+def _setup_mode_test(monkeypatch, tmp_path, *, cfg, captured):
+    monkeypatch.setattr(fetch_transcripts_module, "WORKERS", 2)
+    monkeypatch.setattr(fetch_transcripts_module, "load_selection", lambda _c: ["v1"])
+    monkeypatch.setattr(
+        fetch_transcripts_module, "load_videos", lambda _c: [{"id": "v1", "title": "t"}]
+    )
+    monkeypatch.setattr(fetch_transcripts_module, "get_channel_dir", lambda _c: tmp_path)
+    monkeypatch.setattr(fetch_transcripts_module, "build_proxy_pool", lambda: object())
+    monkeypatch.setattr(fetch_transcripts_module, "_build_circuit_breaker", lambda: None)
+    monkeypatch.setattr(fetch_transcripts_module, "load_runtime_config", lambda: cfg)
+
+    class _StubGate:
+        def acquire(self, _owner, _conc):
+            return threading.Semaphore(1)
+
+    class _StubGateFactory:
+        @staticmethod
+        def get():
+            return _StubGate()
+
+    class _StubQuota:
+        def get_quota(self, _oid):
+            return SimpleNamespace(transcript_concurrency=1)
+
+    monkeypatch.setattr(fetch_transcripts_module, "OwnerConcurrencyGate", _StubGateFactory)
+    monkeypatch.setattr(fetch_transcripts_module, "get_quota_store", lambda: _StubQuota())
+
+    def fake_fetch_single(vid, *_a, pool=None, owner_id=None, breaker=None, shadow=False, **_kw):
+        captured.append({"pool": pool, "shadow": shadow, "owner_id": owner_id})
+        return {"video_id": vid, "status": "done"}
+
+    monkeypatch.setattr(fetch_transcripts_module, "fetch_single_transcript", fake_fetch_single)
+
+
+def _cfg(*, use=False, shadow=False, canary=False):
+    return SimpleNamespace(
+        use_proxy_pool=use, proxy_pool_shadow=shadow, proxy_pool_canary=canary
+    )
+
+
+def test_canary_in_bucket_uses_real_pool(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(monkeypatch, tmp_path, cfg=_cfg(canary=True), captured=captured)
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id="owner_3")
+    assert captured[0]["pool"] is not None
+    assert captured[0]["shadow"] is False
+
+
+def test_canary_out_of_bucket_runs_direct(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(monkeypatch, tmp_path, cfg=_cfg(canary=True), captured=captured)
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id="owner_1")
+    assert captured[0]["pool"] is None
+    assert captured[0]["shadow"] is False
+
+
+def test_canary_anonymous_owner_runs_direct(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(monkeypatch, tmp_path, cfg=_cfg(canary=True), captured=captured)
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id=None)
+    assert captured[0]["pool"] is None
+    assert captured[0]["shadow"] is False
+
+
+def test_use_proxy_pool_overrides_canary(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(
+        monkeypatch, tmp_path, cfg=_cfg(use=True, canary=True), captured=captured
+    )
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id="owner_1")
+    assert captured[0]["pool"] is not None
+    assert captured[0]["shadow"] is False
+
+
+def test_canary_out_of_bucket_falls_back_to_shadow_when_enabled(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(
+        monkeypatch, tmp_path, cfg=_cfg(canary=True, shadow=True), captured=captured
+    )
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id="owner_1")
+    assert captured[0]["pool"] is not None
+    assert captured[0]["shadow"] is True
+
+
+def test_canary_in_bucket_skips_shadow_even_when_enabled(monkeypatch, tmp_path):
+    captured: list[dict] = []
+    _setup_mode_test(
+        monkeypatch, tmp_path, cfg=_cfg(canary=True, shadow=True), captured=captured
+    )
+    fetch_transcripts_module.fetch_transcripts("UC", owner_id="owner_3")
+    assert captured[0]["pool"] is not None
+    assert captured[0]["shadow"] is False
 
 
 def test_fetch_transcripts_uses_parallel_worker_pattern(monkeypatch, tmp_path):

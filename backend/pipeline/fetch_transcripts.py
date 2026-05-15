@@ -1,5 +1,6 @@
 """Fetch YouTube video transcripts using youtube-transcript-api."""
 
+import hashlib
 import logging
 import os
 import re
@@ -57,6 +58,18 @@ def clean_text(text: str) -> str:
 
 def _list_transcripts_direct(video_id: str):
     return YouTubeTranscriptApi().list(video_id)
+
+
+CANARY_BUCKET_COUNT = 10
+
+
+def _owner_in_canary_bucket(owner_id: str | None) -> bool:
+    """Return True for ~10% of owners deterministically (md5 mod 10 == 0)."""
+    if not owner_id:
+        return False
+    digest = hashlib.md5(owner_id.encode("utf-8")).digest()
+    bucket = int.from_bytes(digest[:8], "big") % CANARY_BUCKET_COUNT
+    return bucket == 0
 
 
 def _build_circuit_breaker() -> CircuitBreaker | None:
@@ -358,9 +371,24 @@ def fetch_transcripts(
         )
 
     cfg = load_runtime_config()
-    shadow = cfg.proxy_pool_shadow and not cfg.use_proxy_pool
-    pool = build_proxy_pool() if (cfg.use_proxy_pool or shadow) else None
+    canary_in_bucket = (
+        cfg.proxy_pool_canary
+        and not cfg.use_proxy_pool
+        and _owner_in_canary_bucket(owner_id)
+    )
+    use_real_pool = cfg.use_proxy_pool or canary_in_bucket
+    shadow = cfg.proxy_pool_shadow and not use_real_pool
+    pool = build_proxy_pool() if (use_real_pool or shadow) else None
     breaker = _build_circuit_breaker() if pool is not None else None
+    if canary_in_bucket:
+        logger.info(
+            "proxy_canary_active",
+            extra={
+                "event": "proxy_canary_active",
+                "owner_id": owner_id,
+                "channel_id": channel_id,
+            },
+        )
 
     semaphore: threading.Semaphore | None = None
     if owner_id is not None:

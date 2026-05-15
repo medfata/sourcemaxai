@@ -21,7 +21,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P1.1 | Add `proxy_blocklist` migration (SQL in plan §1.2) | todo | — | | | | |
 | P1.2 | New module `backend/pipeline/proxy_pool.py` (`ProxyConfig`, `ProxyPool`, `BlocklistStore`) | todo | P1.1 | | | | |
-| P1.3 | Add proxy env vars to `backend/config.py` + 3 env example files | todo | — | | | | |
+| P1.3 | Add proxy env vars to `backend/config.py` + 3 env example files | in_progress | — | agent-p1.3-retry-2026-05-15 | proxy/p1-3-config-env-vars | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/2 |
 | P1.4 | Refactor `fetch_single_transcript` to use `fetch_with_retry(pool, ...)` | todo | P1.2, P1.3 | | | | |
 | P1.5 | Tests: `backend/tests/test_proxy_pool.py` (rotation, blocklist, failover) | todo | P1.2 | | | | |
 | P1.6 | Tests: extend `test_fetch_transcripts.py` (mock IpBlocked → retry → success) | todo | P1.4 | | | | |

@@ -79,7 +79,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P7.1 | `USE_PROXY_POOL` feature flag in config; default off | done | P1.4 | agent-p7.1-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
 | P7.2 | Shadow mode: log intended proxy without using it | done | P7.1 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
-| P7.3 | 10% canary by `owner_id % 10 == 0` | in_progress | P3.1, P3.2 | agent-p7-3-2026-05-15 | proxy/p7-3-canary | 2026-05-15 | |
+| P7.3 | 10% canary by `owner_id % 10 == 0` | in_progress | P3.1, P3.2 | agent-p7-3-2026-05-15 | proxy/p7-3-canary | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/13 |
 | P7.4 | Full cutover; monitor 48h | todo | P7.3, P6.1 | | | | |
 | P7.5 | Remove direct-fetch path from `fetch_transcripts.py` | todo | P7.4 | | | | |
 

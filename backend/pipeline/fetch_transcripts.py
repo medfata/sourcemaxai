@@ -1,7 +1,5 @@
 """Fetch YouTube video transcripts using youtube-transcript-api."""
 
-import hashlib
-import logging
 import os
 import re
 import threading
@@ -38,8 +36,6 @@ try:
 except ImportError:
     _BLOCK_EXCEPTIONS = tuple()
 
-logger = logging.getLogger(__name__)
-
 WORKERS = int(os.environ.get("TRANSCRIPT_WORKERS", "8"))
 
 MAX_ATTEMPTS = load_runtime_config().proxy.max_attempts
@@ -57,19 +53,11 @@ def clean_text(text: str) -> str:
 
 
 def _list_transcripts_direct(video_id: str):
+    # Dev-only path: prod config validation rejects boot without IPRoyal creds
+    # (backend/config.py:171), so build_proxy_pool() never returns None in prod
+    # and this is unreachable there. In local dev without proxy creds it is the
+    # only way to fetch a transcript.
     return YouTubeTranscriptApi().list(video_id)
-
-
-CANARY_BUCKET_COUNT = 10
-
-
-def _owner_in_canary_bucket(owner_id: str | None) -> bool:
-    """Return True for ~10% of owners deterministically (md5 mod 10 == 0)."""
-    if not owner_id:
-        return False
-    digest = hashlib.md5(owner_id.encode("utf-8")).digest()
-    bucket = int.from_bytes(digest[:8], "big") % CANARY_BUCKET_COUNT
-    return bucket == 0
 
 
 def _build_circuit_breaker() -> CircuitBreaker | None:
@@ -80,34 +68,6 @@ def _build_circuit_breaker() -> CircuitBreaker | None:
         return CircuitBreaker(storage.SupabaseStorageBackend.from_env())
     except storage.StorageConfigError:
         return None
-
-
-def _emit_shadow_event(
-    video_id: str,
-    pool: ProxyPool,
-    breaker: CircuitBreaker | None,
-) -> None:
-    """Log the proxy we *would* have routed through, without spending it."""
-    provider, session_id = pool.acquire(video_id, 1)
-    if breaker is not None and breaker.is_open(provider.name):
-        logger.info(
-            "proxy_shadow_skipped_open",
-            extra={
-                "event": "proxy_shadow_skipped_open",
-                "video_id": video_id,
-                "provider": provider.name,
-            },
-        )
-        return
-    logger.info(
-        "proxy_shadow",
-        extra={
-            "event": "proxy_shadow",
-            "video_id": video_id,
-            "provider": provider.name,
-            "session_id_prefix": session_id[:4],
-        },
-    )
 
 
 def fetch_with_retry(
@@ -189,7 +149,6 @@ def _fetch_with_gate(
     semaphore: threading.Semaphore | None,
     owner_id: str | None,
     breaker: CircuitBreaker | None,
-    shadow: bool,
 ) -> dict:
     if semaphore is not None:
         with semaphore:
@@ -204,7 +163,6 @@ def _fetch_with_gate(
                 pool=pool,
                 owner_id=owner_id,
                 breaker=breaker,
-                shadow=shadow,
             )
     return fetch_single_transcript(
         video_id,
@@ -217,7 +175,6 @@ def _fetch_with_gate(
         pool=pool,
         owner_id=owner_id,
         breaker=breaker,
-        shadow=shadow,
     )
 
 
@@ -233,7 +190,6 @@ def fetch_single_transcript(
     pool: ProxyPool | None = None,
     owner_id: str | None = None,
     breaker: CircuitBreaker | None = None,
-    shadow: bool = False,
 ) -> dict:
     transcript_path = channel_dir / "transcripts" / f"{video_id}.json"
     if transcript_path.exists():
@@ -253,10 +209,7 @@ def fetch_single_transcript(
         on_progress({"video_id": video_id, "status": "fetching"})
 
     try:
-        if shadow and pool is not None:
-            _emit_shadow_event(video_id, pool, breaker)
-            transcript_list = _list_transcripts_direct(video_id)
-        elif pool is None:
+        if pool is None:
             transcript_list = _list_transcripts_direct(video_id)
         else:
             outcome = fetch_with_retry(
@@ -370,25 +323,8 @@ def fetch_transcripts(
             )
         )
 
-    cfg = load_runtime_config()
-    canary_in_bucket = (
-        cfg.proxy_pool_canary
-        and not cfg.use_proxy_pool
-        and _owner_in_canary_bucket(owner_id)
-    )
-    use_real_pool = cfg.use_proxy_pool or canary_in_bucket
-    shadow = cfg.proxy_pool_shadow and not use_real_pool
-    pool = build_proxy_pool() if (use_real_pool or shadow) else None
+    pool = build_proxy_pool()
     breaker = _build_circuit_breaker() if pool is not None else None
-    if canary_in_bucket:
-        logger.info(
-            "proxy_canary_active",
-            extra={
-                "event": "proxy_canary_active",
-                "owner_id": owner_id,
-                "channel_id": channel_id,
-            },
-        )
 
     semaphore: threading.Semaphore | None = None
     if owner_id is not None:
@@ -412,7 +348,6 @@ def fetch_transcripts(
                 semaphore,
                 owner_id,
                 breaker,
-                shadow,
             ): vid
             for vid, title, upload_date, duration in tasks
         }

@@ -6,8 +6,8 @@ import secrets
 import string
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Protocol
+from datetime import datetime, timedelta, timezone
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from backend import storage
@@ -109,6 +109,121 @@ class BlocklistStore:
         self.backend._delete(self._TABLE, filters={"expires_at": f"lt.{iso_now}"})
         self._cache.clear()
         return len(rows)
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+class CircuitBreaker:
+    """Persistent provider-level breaker backed by the proxy_circuit_state table."""
+
+    _TABLE = "proxy_circuit_state"
+
+    def __init__(
+        self,
+        backend: storage.SupabaseStorageBackend,
+        *,
+        failure_threshold: int = 10,
+        failure_window_seconds: int = 300,
+        open_duration_seconds: int = 900,
+    ) -> None:
+        self.backend = backend
+        self.failure_threshold = failure_threshold
+        self.failure_window_seconds = failure_window_seconds
+        self.open_duration_seconds = open_duration_seconds
+
+    def is_open(self, provider: str) -> bool:
+        row = self._read(provider)
+        if row.get("status") != "open":
+            return False
+        open_until = _parse_iso(row.get("open_until"))
+        if open_until is None:
+            return False
+        return datetime.now(timezone.utc) < open_until
+
+    def should_probe(self, provider: str) -> bool:
+        row = self._read(provider)
+        if row.get("status") != "open":
+            return False
+        open_until = _parse_iso(row.get("open_until"))
+        if open_until is None:
+            return False
+        now = datetime.now(timezone.utc)
+        if now < open_until:
+            return False
+        self._write(
+            provider,
+            status="half_open",
+            updated_at=now.isoformat(),
+        )
+        return True
+
+    def record_failure(self, provider: str, *, reason: str = "") -> None:
+        row = self._read(provider)
+        now = datetime.now(timezone.utc)
+
+        if row.get("status") == "half_open":
+            self._write(
+                provider,
+                status="open",
+                open_until=(now + timedelta(seconds=self.open_duration_seconds)).isoformat(),
+                consecutive_failures=0,
+                updated_at=now.isoformat(),
+            )
+            return
+
+        last_updated = _parse_iso(row.get("updated_at"))
+        if last_updated is not None and (now - last_updated).total_seconds() > self.failure_window_seconds:
+            counter = 1
+        else:
+            counter = int(row.get("consecutive_failures") or 0) + 1
+
+        if counter >= self.failure_threshold:
+            self._write(
+                provider,
+                status="open",
+                open_until=(now + timedelta(seconds=self.open_duration_seconds)).isoformat(),
+                consecutive_failures=0,
+                updated_at=now.isoformat(),
+            )
+        else:
+            self._write(
+                provider,
+                status=row.get("status") or "closed",
+                consecutive_failures=counter,
+                updated_at=now.isoformat(),
+            )
+
+    def record_success(self, provider: str) -> None:
+        now = datetime.now(timezone.utc)
+        self._write(
+            provider,
+            status="closed",
+            consecutive_failures=0,
+            open_until=None,
+            updated_at=now.isoformat(),
+        )
+
+    def _read(self, provider: str) -> dict[str, Any]:
+        rows = self.backend._select(
+            self._TABLE,
+            filters={"provider": f"eq.{provider}"},
+            limit=1,
+        )
+        return rows[0] if rows else {}
+
+    def _write(self, provider: str, **fields: Any) -> None:
+        row = {"provider": provider, **fields}
+        try:
+            self.backend._upsert(self._TABLE, row, on_conflict="provider")
+        except storage.SupabaseStorageError:
+            pass
 
 
 def _generate_session_id() -> str:

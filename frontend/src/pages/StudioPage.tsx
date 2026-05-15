@@ -20,6 +20,7 @@ import { STAGES } from '../types'
 import { formatMonthYear, formatRelativeDate, formatShortDate, formatTimestamp } from '../utils/date'
 import { formatCompactNumber } from '../utils/number'
 import { useConfirm } from '../components/ConfirmDialog'
+import ProxyQuotaMeter from '../components/ProxyQuotaMeter'
 import ChatPage from './ChatPage'
 import './StudioPage.css'
 
@@ -2468,6 +2469,13 @@ function ProgressPanel({
               Retry {failed > 0 ? `${failed} failed` : 'batch'}
             </button>
           </div>
+        )}
+
+        {stage === 'transcripts' && (
+          <ProxyQuotaMeter
+            refreshKey={`${pipelineStatus ?? 'idle'}-${done}`}
+            onBlocked={onProxyQuotaBlocked}
+          />
         )}
 
         <div className="studio-progress-panel">

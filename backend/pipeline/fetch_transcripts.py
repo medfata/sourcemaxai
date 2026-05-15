@@ -1,5 +1,6 @@
 """Fetch YouTube video transcripts using youtube-transcript-api."""
 
+import logging
 import os
 import re
 import threading
@@ -36,6 +37,8 @@ try:
 except ImportError:
     _BLOCK_EXCEPTIONS = tuple()
 
+logger = logging.getLogger(__name__)
+
 WORKERS = int(os.environ.get("TRANSCRIPT_WORKERS", "8"))
 
 MAX_ATTEMPTS = load_runtime_config().proxy.max_attempts
@@ -64,6 +67,34 @@ def _build_circuit_breaker() -> CircuitBreaker | None:
         return CircuitBreaker(storage.SupabaseStorageBackend.from_env())
     except storage.StorageConfigError:
         return None
+
+
+def _emit_shadow_event(
+    video_id: str,
+    pool: ProxyPool,
+    breaker: CircuitBreaker | None,
+) -> None:
+    """Log the proxy we *would* have routed through, without spending it."""
+    provider, session_id = pool.acquire(video_id, 1)
+    if breaker is not None and breaker.is_open(provider.name):
+        logger.info(
+            "proxy_shadow_skipped_open",
+            extra={
+                "event": "proxy_shadow_skipped_open",
+                "video_id": video_id,
+                "provider": provider.name,
+            },
+        )
+        return
+    logger.info(
+        "proxy_shadow",
+        extra={
+            "event": "proxy_shadow",
+            "video_id": video_id,
+            "provider": provider.name,
+            "session_id_prefix": session_id[:4],
+        },
+    )
 
 
 def fetch_with_retry(
@@ -145,6 +176,7 @@ def _fetch_with_gate(
     semaphore: threading.Semaphore | None,
     owner_id: str | None,
     breaker: CircuitBreaker | None,
+    shadow: bool,
 ) -> dict:
     if semaphore is not None:
         with semaphore:
@@ -159,6 +191,7 @@ def _fetch_with_gate(
                 pool=pool,
                 owner_id=owner_id,
                 breaker=breaker,
+                shadow=shadow,
             )
     return fetch_single_transcript(
         video_id,
@@ -171,6 +204,7 @@ def _fetch_with_gate(
         pool=pool,
         owner_id=owner_id,
         breaker=breaker,
+        shadow=shadow,
     )
 
 
@@ -186,6 +220,7 @@ def fetch_single_transcript(
     pool: ProxyPool | None = None,
     owner_id: str | None = None,
     breaker: CircuitBreaker | None = None,
+    shadow: bool = False,
 ) -> dict:
     transcript_path = channel_dir / "transcripts" / f"{video_id}.json"
     if transcript_path.exists():
@@ -205,7 +240,10 @@ def fetch_single_transcript(
         on_progress({"video_id": video_id, "status": "fetching"})
 
     try:
-        if pool is None:
+        if shadow and pool is not None:
+            _emit_shadow_event(video_id, pool, breaker)
+            transcript_list = _list_transcripts_direct(video_id)
+        elif pool is None:
             transcript_list = _list_transcripts_direct(video_id)
         else:
             outcome = fetch_with_retry(
@@ -320,7 +358,8 @@ def fetch_transcripts(
         )
 
     cfg = load_runtime_config()
-    pool = build_proxy_pool() if cfg.use_proxy_pool else None
+    shadow = cfg.proxy_pool_shadow and not cfg.use_proxy_pool
+    pool = build_proxy_pool() if (cfg.use_proxy_pool or shadow) else None
     breaker = _build_circuit_breaker() if pool is not None else None
 
     semaphore: threading.Semaphore | None = None
@@ -345,6 +384,7 @@ def fetch_transcripts(
                 semaphore,
                 owner_id,
                 breaker,
+                shadow,
             ): vid
             for vid, title, upload_date, duration in tasks
         }

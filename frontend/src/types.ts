@@ -130,6 +130,14 @@ export interface UsageRemaining {
   cost_remaining_usd: number
 }
 
+export interface ProxyQuotaUsage {
+  tier_key: string
+  proxy_bytes_used: number
+  proxy_bytes_limit: number
+  proxy_bytes_remaining: number
+  estimated_videos_remaining: number
+}
+
 export interface UsageSummary {
   enforced: boolean
   quota: {

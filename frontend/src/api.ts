@@ -11,6 +11,7 @@ import type {
   PipelineState,
   PipelineCost,
   Profile,
+  ProxyQuotaUsage,
   RetryFailedResult,
   Selection,
   UsageSummary,
@@ -107,6 +108,7 @@ export const api = {
   pipelineCost: (channelId: string) =>
     apiGet<PipelineCost>(`/api/pipeline/cost?channel_id=${channelId}`),
   usageSummary: () => apiGet<UsageSummary>('/api/usage/summary'),
+  getProxyUsage: () => apiGet<ProxyQuotaUsage>('/api/quota/proxy-usage'),
   pipelineCancel: (channelId: string) =>
     apiPost<{ status: string }>('/api/pipeline/cancel', { channel_id: channelId }),
   pipelineResume: (channelId: string) =>

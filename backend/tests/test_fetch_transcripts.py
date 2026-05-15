@@ -137,6 +137,86 @@ def test_fetch_with_retry_no_retry_on_transcripts_disabled(monkeypatch):
     assert len(pool.mark_blocked_calls) == 0
 
 
+def test_emit_shadow_event_logs_intended_proxy(caplog):
+    pool = _FakeProxyPool()
+    with caplog.at_level("INFO", logger="backend.pipeline.fetch_transcripts"):
+        fetch_transcripts_module._emit_shadow_event("vid_shadow_a", pool, breaker=None)
+    assert pool.acquire_calls == [("vid_shadow_a", 1)]
+    assert pool.mark_blocked_calls == []
+    events = [getattr(r, "event", None) for r in caplog.records]
+    assert "proxy_shadow" in events
+
+
+def test_emit_shadow_event_breaker_open_logs_skipped(caplog):
+    pool = _FakeProxyPool()
+
+    class _OpenBreaker:
+        def is_open(self, _provider):
+            return True
+
+    with caplog.at_level("INFO", logger="backend.pipeline.fetch_transcripts"):
+        fetch_transcripts_module._emit_shadow_event("vid_shadow_b", pool, breaker=_OpenBreaker())
+    assert pool.acquire_calls == [("vid_shadow_b", 1)]
+    events = [getattr(r, "event", None) for r in caplog.records]
+    assert "proxy_shadow_skipped_open" in events
+    assert "proxy_shadow" not in events
+
+
+def test_fetch_single_transcript_shadow_mode_skips_proxy_path(monkeypatch, tmp_path):
+    pool = _FakeProxyPool()
+    emitted: list[tuple] = []
+    direct_calls: list[str] = []
+    saved: list[tuple] = []
+    quota_record_calls: list[dict] = []
+
+    def fake_emit(vid, p, b):
+        emitted.append((vid, p, b))
+
+    class _Segment:
+        def __init__(self, text, start):
+            self.text = text
+            self.start = start
+
+    class _Transcript:
+        def fetch(self):
+            return [_Segment("hello world", 0.0)]
+
+    class _List:
+        def find_manually_created_transcript(self, _langs):
+            return _Transcript()
+
+    def fake_direct(vid):
+        direct_calls.append(vid)
+        return _List()
+
+    class _StubQuota:
+        def record_usage(self, **kwargs):
+            quota_record_calls.append(kwargs)
+
+    monkeypatch.setattr(fetch_transcripts_module, "_emit_shadow_event", fake_emit)
+    monkeypatch.setattr(fetch_transcripts_module, "_list_transcripts_direct", fake_direct)
+    monkeypatch.setattr(fetch_transcripts_module, "save_transcript", lambda *a, **kw: saved.append(a))
+    monkeypatch.setattr(fetch_transcripts_module, "get_quota_store", lambda: _StubQuota())
+
+    result = fetch_transcripts_module.fetch_single_transcript(
+        "vid_shadow_int",
+        "Title",
+        "2026-01-01",
+        60,
+        "UC_x",
+        tmp_path,
+        pool=pool,
+        owner_id="owner_1",
+        shadow=True,
+    )
+
+    assert emitted == [("vid_shadow_int", pool, None)]
+    assert direct_calls == ["vid_shadow_int"]
+    assert result["status"] == "done"
+    assert pool.mark_blocked_calls == []
+    assert quota_record_calls == []
+
+
 def test_fetch_transcripts_uses_parallel_worker_pattern(monkeypatch, tmp_path):
     channel_id = "UC_transcript_block"
     calls: list[str] = []

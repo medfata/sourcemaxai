@@ -58,6 +58,7 @@ class RuntimeConfig:
     log_format: str
     proxy: ProxyConfig
     use_proxy_pool: bool
+    proxy_pool_shadow: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -138,6 +139,7 @@ def load_runtime_config(role: str = "api") -> RuntimeConfig:
     proxy = _load_proxy_config(errors)
 
     use_proxy_pool = _env("USE_PROXY_POOL", "false").lower() == "true"
+    proxy_pool_shadow = _env("PROXY_POOL_SHADOW", "false").lower() == "true"
 
     if storage_backend not in VALID_STORAGE_BACKENDS:
         errors.append(
@@ -201,6 +203,7 @@ def load_runtime_config(role: str = "api") -> RuntimeConfig:
         log_format=log_format,
         proxy=proxy,
         use_proxy_pool=use_proxy_pool,
+        proxy_pool_shadow=proxy_pool_shadow,
         errors=errors,
         warnings=warnings,
     )
@@ -248,6 +251,7 @@ def runtime_report(role: str = "api") -> dict[str, object]:
             "transcript_workers": config.proxy.transcript_workers,
         },
         "use_proxy_pool": config.use_proxy_pool,
+        "proxy_pool_shadow": config.proxy_pool_shadow,
         "errors": config.errors,
         "warnings": config.warnings,
     }

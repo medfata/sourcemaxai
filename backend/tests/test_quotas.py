@@ -57,6 +57,9 @@ class FakeQuotaStore(QuotaStore):
     def chat_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
         return self._chat_window
 
+    def proxy_event_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
+        return 0
+
     def get_active_credit_seconds(self, owner_id: str) -> int:
         return self._quota.credit_transcript_seconds
 

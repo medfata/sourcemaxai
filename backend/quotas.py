@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -466,6 +467,29 @@ def get_quota_store() -> QuotaStore:
     if backend == "supabase":
         return SupabaseQuotaStore(storage.SupabaseStorageBackend.from_env())
     return LocalQuotaStore()
+
+
+class OwnerConcurrencyGate:
+    """Per-owner semaphore tracked in-process. Works for single-worker deployment."""
+
+    _instance: "OwnerConcurrencyGate | None" = None
+    _lock = threading.Lock()
+
+    def __init__(self) -> None:
+        self._semaphores: dict[str, threading.Semaphore] = {}
+
+    @classmethod
+    def get(cls) -> "OwnerConcurrencyGate":
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    def acquire(self, owner_id: str, concurrency: int) -> threading.Semaphore:
+        if owner_id not in self._semaphores:
+            self._semaphores[owner_id] = threading.Semaphore(concurrency)
+        return self._semaphores[owner_id]
 
 
 def check_pipeline_start(

@@ -12,6 +12,7 @@ from backend.quotas import (
     DEFAULT_MAX_TRANSCRIPT_SECONDS_PER_RUN,
     DEFAULT_MONTHLY_CHAT_MESSAGES,
     DEFAULT_MONTHLY_TRANSCRIPT_SECONDS,
+    ESTIMATED_BYTES_PER_TRANSCRIPT,
     LocalQuotaStore,
     MonthlyUsage,
     Quota,
@@ -19,6 +20,7 @@ from backend.quotas import (
     check_chat_monthly,
     check_chat_rate,
     check_pipeline_start,
+    check_transcript_fetch,
     estimate_summary_cost_usd,
     month_window_utc,
     remaining_budget,
@@ -38,11 +40,13 @@ class FakeQuotaStore(QuotaStore):
         usage: MonthlyUsage | None = None,
         active_runs: int = 0,
         chat_window: int = 0,
+        proxy_window: int = 0,
     ) -> None:
         self._quota = quota or Quota()
         self._usage = usage or MonthlyUsage()
         self._active_runs = active_runs
         self._chat_window = chat_window
+        self._proxy_window = proxy_window
         self.recorded: list[dict[str, Any]] = []
 
     def get_quota(self, owner_id: str) -> Quota:
@@ -58,7 +62,7 @@ class FakeQuotaStore(QuotaStore):
         return self._chat_window
 
     def proxy_event_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
-        return 0
+        return self._proxy_window
 
     def get_active_credit_seconds(self, owner_id: str) -> int:
         return self._quota.credit_transcript_seconds
@@ -286,3 +290,64 @@ def test_default_tier_constants_match_plan():
     assert DEFAULT_MONTHLY_TRANSCRIPT_SECONDS == 150 * 60
     assert DEFAULT_MONTHLY_CHAT_MESSAGES == 20
     assert DEFAULT_MAX_TRANSCRIPT_SECONDS_PER_RUN == 30 * 60
+
+
+def test_check_transcript_fetch_blocks_on_proxy_bytes_limit():
+    store = FakeQuotaStore(
+        quota=Quota(proxy_bytes_per_month=100_000),
+        usage=MonthlyUsage(proxy_bytes=90_000),
+    )
+    pending = 5
+    decision = check_transcript_fetch(store, "u", pending_video_count=pending)
+    assert decision.allowed is False
+    assert decision.reason == "proxy_bytes_limit"
+
+
+def test_check_transcript_fetch_allows_under_proxy_bytes_limit():
+    store = FakeQuotaStore(
+        quota=Quota(proxy_bytes_per_month=100_000),
+        usage=MonthlyUsage(proxy_bytes=10_000),
+    )
+    pending = 1
+    decision = check_transcript_fetch(store, "u", pending_video_count=pending)
+    assert decision.allowed is True
+
+
+def test_check_transcript_fetch_blocks_on_rate_limit():
+    store = FakeQuotaStore(
+        quota=Quota(proxy_requests_per_minute=10),
+        proxy_window=10,
+    )
+    decision = check_transcript_fetch(store, "u", pending_video_count=1)
+    assert decision.allowed is False
+    assert decision.reason == "proxy_rate_limit"
+
+
+def test_check_transcript_fetch_allows_under_rate_limit():
+    store = FakeQuotaStore(
+        quota=Quota(proxy_requests_per_minute=10),
+        proxy_window=9,
+    )
+    decision = check_transcript_fetch(store, "u", pending_video_count=1)
+    assert decision.allowed is True
+
+
+def test_check_transcript_fetch_not_enforced_when_local_store():
+    store = LocalQuotaStore()
+    decision = check_transcript_fetch(store, "u", pending_video_count=999)
+    assert decision.allowed is True
+
+
+def test_remaining_budget_includes_proxy_fields():
+    quota = Quota(
+        proxy_bytes_per_month=500_000,
+        proxy_requests_per_minute=20,
+        transcript_concurrency=3,
+    )
+    usage = MonthlyUsage(proxy_bytes=123_456)
+    summary = remaining_budget(quota, usage)
+    assert summary["proxy_bytes_per_month"] == 500_000
+    assert summary["proxy_bytes_used"] == 123_456
+    assert summary["proxy_bytes_remaining"] == 376_544
+    assert summary["proxy_requests_per_minute"] == 20
+    assert summary["transcript_concurrency"] == 3

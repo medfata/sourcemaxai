@@ -22,6 +22,9 @@ DEFAULT_MONTHLY_TOKEN_LIMIT = 1_000_000
 DEFAULT_MONTHLY_COST_LIMIT_USD = 5.0
 DEFAULT_MAX_CONCURRENT_RUNS = 1
 DEFAULT_CHAT_PER_MINUTE_LIMIT = 10
+DEFAULT_PROXY_BYTES_PER_MONTH = 524_288_000
+DEFAULT_PROXY_REQUESTS_PER_MINUTE = 30
+DEFAULT_TRANSCRIPT_CONCURRENCY = 2
 
 SUMMARY_INPUT_USD_PER_M_TOKENS = 0.30
 SUMMARY_OUTPUT_USD_PER_M_TOKENS = 1.20
@@ -43,6 +46,9 @@ class Quota:
     max_concurrent_runs: int = DEFAULT_MAX_CONCURRENT_RUNS
     chat_per_minute_limit: int = DEFAULT_CHAT_PER_MINUTE_LIMIT
     credit_transcript_seconds: int = 0
+    proxy_bytes_per_month: int = DEFAULT_PROXY_BYTES_PER_MONTH
+    proxy_requests_per_minute: int = DEFAULT_PROXY_REQUESTS_PER_MINUTE
+    transcript_concurrency: int = DEFAULT_TRANSCRIPT_CONCURRENCY
 
 
 @dataclass
@@ -55,6 +61,7 @@ class MonthlyUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    proxy_bytes: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -159,6 +166,8 @@ class QuotaStore(ABC):
         transcript_seconds: int = 0,
         chat_messages: int = 0,
         cost_usd: float = 0.0,
+        proxy_bytes: int = 0,
+        proxy_provider: str | None = None,
     ) -> None:
         """Persist a usage_events row for billing + rate limiting."""
 
@@ -195,6 +204,8 @@ class LocalQuotaStore(QuotaStore):
         transcript_seconds: int = 0,
         chat_messages: int = 0,
         cost_usd: float = 0.0,
+        proxy_bytes: int = 0,
+        proxy_provider: str | None = None,
     ) -> None:
         return None
 
@@ -262,6 +273,15 @@ class SupabaseQuotaStore(QuotaStore):
                 row.get("chat_per_minute_limit", DEFAULT_CHAT_PER_MINUTE_LIMIT)
             ),
             credit_transcript_seconds=self.get_active_credit_seconds(owner_id),
+            proxy_bytes_per_month=int(
+                row.get("proxy_bytes_per_month", DEFAULT_PROXY_BYTES_PER_MONTH)
+            ),
+            proxy_requests_per_minute=int(
+                row.get("proxy_requests_per_minute", DEFAULT_PROXY_REQUESTS_PER_MINUTE)
+            ),
+            transcript_concurrency=int(
+                row.get("transcript_concurrency", DEFAULT_TRANSCRIPT_CONCURRENCY)
+            ),
         )
 
     def get_monthly_usage(self, owner_id: str) -> MonthlyUsage:
@@ -270,7 +290,7 @@ class SupabaseQuotaStore(QuotaStore):
             "usage_events",
             select=(
                 "event_type,input_tokens,output_tokens,cost_usd,"
-                "transcript_seconds,chat_messages"
+                "transcript_seconds,chat_messages,proxy_bytes"
             ),
             filters={
                 "owner_id": self._eq(owner_id),
@@ -285,6 +305,7 @@ class SupabaseQuotaStore(QuotaStore):
             usage.transcript_seconds += int(row.get("transcript_seconds") or 0)
             usage.chat_messages += int(row.get("chat_messages") or 0)
             usage.cost_usd += float(row.get("cost_usd") or 0)
+            usage.proxy_bytes += int(row.get("proxy_bytes") or 0)
             if int(row.get("transcript_seconds") or 0) > 0:
                 usage.videos += 1
         usage.cost_usd = round(usage.cost_usd, 6)
@@ -374,6 +395,8 @@ class SupabaseQuotaStore(QuotaStore):
         transcript_seconds: int = 0,
         chat_messages: int = 0,
         cost_usd: float = 0.0,
+        proxy_bytes: int = 0,
+        proxy_provider: str | None = None,
     ) -> None:
         transcript_seconds = int(max(transcript_seconds, 0))
         chat_messages = int(max(chat_messages, 0))
@@ -387,11 +410,14 @@ class SupabaseQuotaStore(QuotaStore):
             "transcript_seconds": transcript_seconds,
             "chat_messages": chat_messages,
             "cost_usd": round(float(max(cost_usd, 0.0)), 6),
+            "proxy_bytes": int(max(proxy_bytes, 0)),
         }
         if model:
             row["model"] = model
         if _is_uuid(run_id):
             row["run_id"] = run_id
+        if proxy_provider:
+            row["proxy_provider"] = proxy_provider
         try:
             self.backend._insert("usage_events", row)
         except storage.SupabaseStorageError:
@@ -617,4 +643,9 @@ def remaining_budget(quota: Quota, usage: MonthlyUsage) -> dict[str, Any]:
         "cost_remaining_usd": round(
             max(quota.monthly_cost_limit_usd - usage.cost_usd, 0.0), 6
         ),
+        "proxy_bytes_per_month": quota.proxy_bytes_per_month,
+        "proxy_bytes_used": usage.proxy_bytes,
+        "proxy_bytes_remaining": max(quota.proxy_bytes_per_month - usage.proxy_bytes, 0),
+        "proxy_requests_per_minute": quota.proxy_requests_per_minute,
+        "transcript_concurrency": quota.transcript_concurrency,
     }

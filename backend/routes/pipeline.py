@@ -26,6 +26,7 @@ from backend.quotas import (
     SUMMARY_INPUT_USD_PER_M_TOKENS,
     SUMMARY_OUTPUT_USD_PER_M_TOKENS,
     check_pipeline_start,
+    check_transcript_fetch,
     get_quota_store,
     remaining_budget,
     transcript_seconds_from_transcript,
@@ -350,7 +351,10 @@ async def _run_pipeline(
             _write_pipeline_state(channel_id, state, owner_id=owner_id)
 
             await asyncio.to_thread(
-                fetch_transcripts, channel_id, on_progress=make_on_progress("transcripts")
+                fetch_transcripts,
+                channel_id,
+                owner_id,
+                make_on_progress("transcripts"),
             )
             _ensure_not_cancelled(state)
             state["stages"]["transcripts"]["status"] = "done"
@@ -526,6 +530,19 @@ async def post_pipeline_start(
                 error="quota_exceeded",
                 data={"reason": decision.reason, **decision.detail},
             )
+
+        # Proxy transcript quota pre-check
+        selection = load_selection(channel_id, owner_id=owner_id) or []
+        if quota_store.is_enforced and selection:
+            transcript_decision = check_transcript_fetch(
+                quota_store, owner_id, pending_video_count=len(selection)
+            )
+            if not transcript_decision.allowed:
+                return ApiResponse(
+                    ok=False,
+                    error="quota_exceeded",
+                    data={"reason": transcript_decision.reason, **transcript_decision.detail},
+                )
 
     run = store.create_run(owner_id, channel_id)
     if store.is_durable:

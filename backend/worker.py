@@ -50,8 +50,11 @@ async def run_worker_loop() -> None:
             logger.exception("pipeline_worker_iteration_failed")
 
         now = time.monotonic()
+        supabase_storage = (
+            os.environ.get("STORAGE_BACKEND", "local").strip().lower() == "supabase"
+        )
 
-        if now - last_blocklist_cleanup >= BLOCKLIST_CLEANUP_INTERVAL:
+        if supabase_storage and now - last_blocklist_cleanup >= BLOCKLIST_CLEANUP_INTERVAL:
             try:
                 blocklist = BlocklistStore(storage.SupabaseStorageBackend.from_env())
                 cleaned = blocklist.cleanup_expired()
@@ -61,7 +64,7 @@ async def run_worker_loop() -> None:
                 logger.exception("proxy_blocklist_cleanup_failed")
             last_blocklist_cleanup = now
 
-        if now - last_circuit_probe >= CIRCUIT_PROBE_INTERVAL:
+        if supabase_storage and now - last_circuit_probe >= CIRCUIT_PROBE_INTERVAL:
             try:
                 breaker = CircuitBreaker(storage.SupabaseStorageBackend.from_env())
                 cfg = load_runtime_config()
@@ -72,7 +75,10 @@ async def run_worker_loop() -> None:
                     providers.append("webshare")
                 for provider_name in providers:
                     if breaker.should_probe(provider_name):
-                        logger.info("circuit_breaker_probe", extra={"provider": provider_name, "status": "half_open"})
+                        logger.info(
+                            "circuit_breaker_probe",
+                            extra={"provider": provider_name, "status": "half_open"},
+                        )
             except Exception:
                 logger.exception("circuit_breaker_probe_failed")
             last_circuit_probe = now

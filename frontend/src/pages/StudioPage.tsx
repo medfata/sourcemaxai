@@ -1003,6 +1003,10 @@ export default function StudioPage({
                 <span>Limit</span>
                 <b>{(proxyQuotaBlocked.limit / 1024 / 1024).toFixed(1)} MB</b>
               </div>
+              <div className="studio-modal-stat">
+                <span>Tier</span>
+                <b>{proxyQuotaBlocked.tier}</b>
+              </div>
               <p className="studio-modal-hint">Upgrade your plan or wait until the next billing cycle to continue fetching transcripts via proxy.</p>
             </div>
             <div className="studio-modal-footer">

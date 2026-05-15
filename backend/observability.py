@@ -6,8 +6,12 @@ import json
 import logging
 import os
 import sys
+import threading
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 STANDARD_LOG_ATTRS = {
     "args",
@@ -79,7 +83,6 @@ def init_error_reporting() -> None:
     if not dsn:
         return
 
-    logger = logging.getLogger(__name__)
     try:
         import sentry_sdk  # type: ignore[import-not-found]
     except ImportError:
@@ -91,10 +94,6 @@ def init_error_reporting() -> None:
         environment=os.environ.get("APP_ENV", "development"),
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0")),
     )
-
-
-import threading
-from collections import defaultdict
 
 
 class ProxyMetrics:
@@ -152,9 +151,6 @@ def get_proxy_metrics() -> ProxyMetrics:
             if _proxy_metrics is None:
                 _proxy_metrics = ProxyMetrics()
     return _proxy_metrics
-
-
-logger = logging.getLogger(__name__)
 
 
 def log_daily_proxy_summary(quota_store: Any) -> dict[str, Any]:

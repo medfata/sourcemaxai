@@ -477,6 +477,7 @@ class OwnerConcurrencyGate:
 
     def __init__(self) -> None:
         self._semaphores: dict[str, threading.Semaphore] = {}
+        self._map_lock = threading.Lock()
 
     @classmethod
     def get(cls) -> "OwnerConcurrencyGate":
@@ -487,9 +488,12 @@ class OwnerConcurrencyGate:
         return cls._instance
 
     def acquire(self, owner_id: str, concurrency: int) -> threading.Semaphore:
-        if owner_id not in self._semaphores:
-            self._semaphores[owner_id] = threading.Semaphore(concurrency)
-        return self._semaphores[owner_id]
+        with self._map_lock:
+            sem = self._semaphores.get(owner_id)
+            if sem is None:
+                sem = threading.Semaphore(max(int(concurrency), 1))
+                self._semaphores[owner_id] = sem
+            return sem
 
 
 def check_pipeline_start(
@@ -682,6 +686,7 @@ def check_transcript_fetch(
             allowed=False,
             reason="proxy_bytes_limit",
             detail={
+                "tier_key": quota.tier_key,
                 "proxy_bytes_used": usage.proxy_bytes,
                 "proxy_bytes_limit": quota.proxy_bytes_per_month,
                 "projected_bytes": projected_bytes,
@@ -695,6 +700,7 @@ def check_transcript_fetch(
             allowed=False,
             reason="proxy_rate_limit",
             detail={
+                "tier_key": quota.tier_key,
                 "limit": quota.proxy_requests_per_minute,
                 "window_seconds": 60,
                 "recent": recent,

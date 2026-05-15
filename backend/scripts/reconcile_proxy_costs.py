@@ -10,7 +10,6 @@ import sys
 from datetime import datetime, timezone
 
 from backend import storage
-from backend.quotas import SupabaseQuotaStore
 
 
 def _month_window(month_str: str) -> tuple[str, str]:
@@ -34,14 +33,13 @@ def main() -> None:
         print("Error: only Supabase backend is supported for cost reconciliation")
         sys.exit(1)
 
-    quota_store = SupabaseQuotaStore(backend)
     now = datetime.now(timezone.utc)
     month_str = args.month or now.strftime("%Y-%m")
     start_iso, end_iso = _month_window(month_str)
 
     rows = backend._select(
         "usage_events",
-        select="proxy_provider,proxy_bytes",
+        select="proxy_provider,proxy_bytes,created_at",
         filters={
             "event_type": backend._eq("transcript_fetch"),
             "created_at": f"gte.{start_iso}",
@@ -49,6 +47,7 @@ def main() -> None:
         },
         limit=50000,
     )
+    rows = [r for r in rows if str(r.get("created_at") or "") < end_iso]
 
     total_bytes = 0
     by_provider: dict[str, int] = {}

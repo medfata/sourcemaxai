@@ -3929,3 +3929,95 @@
 
 /* Reserve scroll-bottom space so floating bar doesn't cover content */
 .studio-scroll.has-runbar { padding-bottom: 96px; }
+
+/* Proxy quota modal */
+.studio-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.studio-modal {
+  background: var(--studio-card-bg, #fff);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.25);
+}
+.studio-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px 0;
+  color: var(--studio-danger, #c72822);
+}
+.studio-modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.studio-modal-body {
+  padding: 16px 24px;
+}
+.studio-modal-body p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--ink-1, #1a1a1a);
+}
+.studio-modal-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+}
+.studio-modal-stat span { color: var(--ink-3, #6b7280); }
+.studio-modal-stat b { color: var(--ink, #0a0a0a); }
+.studio-modal-hint {
+  font-size: 13px !important;
+  color: var(--ink-3, #6b7280) !important;
+}
+.studio-modal-footer {
+  padding: 12px 24px 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Proxy status badges in work rows */
+.studio-work-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.01em;
+  margin-left: 6px;
+}
+.studio-work-badge.proxy-retrying {
+  background: rgba(217, 159, 45, 0.12);
+  color: #b8860b;
+  border: 1px solid rgba(217, 159, 45, 0.25);
+}
+.studio-work-badge.proxy-exhausted {
+  background: rgba(199, 40, 34, 0.08);
+  color: var(--studio-danger, #c72822);
+  border: 1px solid rgba(199, 40, 34, 0.18);
+}
+.studio-spinner-sm {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: studio-spin 0.7s linear infinite;
+}
+@keyframes studio-spin {
+  to { transform: rotate(360deg); }
+}

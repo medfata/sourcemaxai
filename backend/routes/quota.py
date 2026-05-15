@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from backend.auth import CurrentUser, get_current_user
 from backend.models import ApiResponse
-from backend.quotas import get_quota_store
+from backend.quotas import ESTIMATED_BYTES_PER_TRANSCRIPT, get_quota_store
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ async def get_proxy_usage(
     limit = quota.proxy_bytes_per_month
     used = usage.proxy_bytes
     remaining = max(limit - used, 0)
-    estimated_videos = remaining // 25_000 if remaining > 0 else 0
+    estimated_videos = remaining // ESTIMATED_BYTES_PER_TRANSCRIPT if remaining > 0 else 0
 
     return ApiResponse(
         ok=True,

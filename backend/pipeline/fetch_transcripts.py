@@ -13,7 +13,7 @@ from backend.pipeline.schema_versions import (
     TRANSCRIPT_SCHEMA_VERSION,
     get_transcript_stale_reasons,
 )
-from backend.quotas import OwnerConcurrencyGate, get_quota_store
+from backend.quotas import ESTIMATED_BYTES_PER_TRANSCRIPT, OwnerConcurrencyGate, get_quota_store
 from backend.storage import (
     get_channel_dir,
     load_selection,
@@ -56,12 +56,23 @@ def _list_transcripts_direct(video_id: str):
     return YouTubeTranscriptApi().list(video_id)
 
 
+def _build_circuit_breaker() -> CircuitBreaker | None:
+    """Construct a Supabase-backed breaker, or `None` when storage is local-only."""
+    if os.environ.get("STORAGE_BACKEND", "local").strip().lower() != "supabase":
+        return None
+    try:
+        return CircuitBreaker(storage.SupabaseStorageBackend.from_env())
+    except storage.StorageConfigError:
+        return None
+
+
 def fetch_with_retry(
     video_id: str,
     *,
     pool: ProxyPool,
     max_attempts: int,
     owner_id: str | None = None,
+    breaker: CircuitBreaker | None = None,
 ):
     """Acquire a proxy session per attempt and return a transcript list, retrying on IP blocks.
 
@@ -69,28 +80,43 @@ def fetch_with_retry(
     when the caller should short-circuit without further proxy attempts.
     """
     last_error: Exception | None = None
-    breaker = CircuitBreaker(storage.SupabaseStorageBackend.from_env())
+    if breaker is None:
+        breaker = _build_circuit_breaker()
+    open_providers: set[str] = set()
+    known_providers: set[str] | None = None
     for attempt in range(1, max_attempts + 1):
         provider, session_id = pool.acquire(video_id, attempt)
-        if breaker.is_open(provider.name):
+        if breaker is not None and breaker.is_open(provider.name):
+            open_providers.add(provider.name)
+            if known_providers is None:
+                known_providers = {p.name for p in getattr(pool, "providers", [])}
+            if known_providers and open_providers >= known_providers:
+                return {
+                    "video_id": video_id,
+                    "status": "failed",
+                    "error": "circuit_open",
+                    "providers_open": sorted(open_providers),
+                }
             continue
         url = pool.proxy_url(provider, session_id)
         cfg = GenericProxyConfig(http_url=url, https_url=url)
         try:
             result = YouTubeTranscriptApi(proxy_config=cfg).list(video_id)
-            breaker.record_success(provider.name)
+            if breaker is not None:
+                breaker.record_success(provider.name)
             if owner_id is not None:
                 get_quota_store().record_usage(
                     owner_id=owner_id,
                     event_type="transcript_fetch",
-                    proxy_bytes=25_000,
+                    proxy_bytes=ESTIMATED_BYTES_PER_TRANSCRIPT,
                     proxy_provider=provider.name,
                 )
             return result
         except (TranscriptsDisabled, NoTranscriptFound):
             return {"video_id": video_id, "status": "unavailable"}
         except _BLOCK_EXCEPTIONS as exc:
-            breaker.record_failure(provider.name, reason=str(exc) or exc.__class__.__name__)
+            if breaker is not None:
+                breaker.record_failure(provider.name, reason=str(exc) or exc.__class__.__name__)
             pool.mark_blocked(provider, session_id, str(exc) or exc.__class__.__name__)
             last_error = exc
             continue
@@ -117,6 +143,8 @@ def _fetch_with_gate(
     on_progress,
     pool: ProxyPool | None,
     semaphore: threading.Semaphore | None,
+    owner_id: str | None,
+    breaker: CircuitBreaker | None,
 ) -> dict:
     if semaphore is not None:
         with semaphore:
@@ -129,6 +157,8 @@ def _fetch_with_gate(
                 channel_dir,
                 on_progress,
                 pool=pool,
+                owner_id=owner_id,
+                breaker=breaker,
             )
     return fetch_single_transcript(
         video_id,
@@ -139,6 +169,8 @@ def _fetch_with_gate(
         channel_dir,
         on_progress,
         pool=pool,
+        owner_id=owner_id,
+        breaker=breaker,
     )
 
 
@@ -152,6 +184,8 @@ def fetch_single_transcript(
     on_progress=None,
     *,
     pool: ProxyPool | None = None,
+    owner_id: str | None = None,
+    breaker: CircuitBreaker | None = None,
 ) -> dict:
     transcript_path = channel_dir / "transcripts" / f"{video_id}.json"
     if transcript_path.exists():
@@ -178,6 +212,8 @@ def fetch_single_transcript(
                 video_id,
                 pool=pool,
                 max_attempts=MAX_ATTEMPTS,
+                owner_id=owner_id,
+                breaker=breaker,
             )
             if isinstance(outcome, dict):
                 if outcome.get("status") == "unavailable":
@@ -285,6 +321,7 @@ def fetch_transcripts(
 
     cfg = load_runtime_config()
     pool = build_proxy_pool() if cfg.use_proxy_pool else None
+    breaker = _build_circuit_breaker() if pool is not None else None
 
     semaphore: threading.Semaphore | None = None
     if owner_id is not None:
@@ -306,6 +343,8 @@ def fetch_transcripts(
                 on_progress,
                 pool,
                 semaphore,
+                owner_id,
+                breaker,
             ): vid
             for vid, title, upload_date, duration in tasks
         }

@@ -2,15 +2,18 @@
 
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from backend import storage
 from backend.config import load_runtime_config
-from backend.pipeline.proxy_pool import ProxyPool, build_proxy_pool
+from backend.pipeline.proxy_pool import CircuitBreaker, ProxyPool, build_proxy_pool
 from backend.pipeline.schema_versions import (
     TRANSCRIPT_SCHEMA_VERSION,
     get_transcript_stale_reasons,
 )
+from backend.quotas import OwnerConcurrencyGate, get_quota_store
 from backend.storage import (
     get_channel_dir,
     load_selection,
@@ -66,15 +69,28 @@ def fetch_with_retry(
     when the caller should short-circuit without further proxy attempts.
     """
     last_error: Exception | None = None
+    breaker = CircuitBreaker(storage.SupabaseStorageBackend.from_env())
     for attempt in range(1, max_attempts + 1):
         provider, session_id = pool.acquire(video_id, attempt)
+        if breaker.is_open(provider.name):
+            continue
         url = pool.proxy_url(provider, session_id)
         cfg = GenericProxyConfig(http_url=url, https_url=url)
         try:
-            return YouTubeTranscriptApi(proxy_config=cfg).list(video_id)
+            result = YouTubeTranscriptApi(proxy_config=cfg).list(video_id)
+            breaker.record_success(provider.name)
+            if owner_id is not None:
+                get_quota_store().record_usage(
+                    owner_id=owner_id,
+                    event_type="transcript_fetch",
+                    proxy_bytes=25_000,
+                    proxy_provider=provider.name,
+                )
+            return result
         except (TranscriptsDisabled, NoTranscriptFound):
             return {"video_id": video_id, "status": "unavailable"}
         except _BLOCK_EXCEPTIONS as exc:
+            breaker.record_failure(provider.name, reason=str(exc) or exc.__class__.__name__)
             pool.mark_blocked(provider, session_id, str(exc) or exc.__class__.__name__)
             last_error = exc
             continue
@@ -89,6 +105,41 @@ def fetch_with_retry(
         "error": "all_proxies_blocked",
         "last_error": str(last_error) if last_error else None,
     }
+
+
+def _fetch_with_gate(
+    video_id: str,
+    title: str,
+    upload_date: str,
+    duration: int,
+    channel_id: str,
+    channel_dir: Path,
+    on_progress,
+    pool: ProxyPool | None,
+    semaphore: threading.Semaphore | None,
+) -> dict:
+    if semaphore is not None:
+        with semaphore:
+            return fetch_single_transcript(
+                video_id,
+                title,
+                upload_date,
+                duration,
+                channel_id,
+                channel_dir,
+                on_progress,
+                pool=pool,
+            )
+    return fetch_single_transcript(
+        video_id,
+        title,
+        upload_date,
+        duration,
+        channel_id,
+        channel_dir,
+        on_progress,
+        pool=pool,
+    )
 
 
 def fetch_single_transcript(
@@ -234,11 +285,17 @@ def fetch_transcripts(
 
     pool = build_proxy_pool()
 
+    semaphore: threading.Semaphore | None = None
+    if owner_id is not None:
+        quota_store = get_quota_store()
+        quota = quota_store.get_quota(owner_id)
+        semaphore = OwnerConcurrencyGate.get().acquire(owner_id, quota.transcript_concurrency)
+
     results = []
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         future_to_vid = {
             executor.submit(
-                fetch_single_transcript,
+                _fetch_with_gate,
                 vid,
                 title,
                 upload_date,
@@ -246,7 +303,8 @@ def fetch_transcripts(
                 channel_id,
                 channel_dir,
                 on_progress,
-                pool=pool,
+                pool,
+                semaphore,
             ): vid
             for vid, title, upload_date, duration in tasks
         }

@@ -91,3 +91,64 @@ def init_error_reporting() -> None:
         environment=os.environ.get("APP_ENV", "development"),
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0")),
     )
+
+
+import threading
+from collections import defaultdict
+
+
+class ProxyMetrics:
+    """In-memory metrics for proxy transcript fetching."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counters: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._histograms: dict[tuple[str, str], list[float]] = defaultdict(list)
+        self._gauges: dict[tuple[str, str], float] = {}
+
+    def inc_proxy_fetch_total(self, provider: str, outcome: str) -> None:
+        with self._lock:
+            self._counters[("proxy_fetch_total", provider, outcome)] += 1
+
+    def inc_proxy_fetch_bytes(self, provider: str, bytes_count: int) -> None:
+        with self._lock:
+            self._counters[("proxy_fetch_bytes", provider, "total")] += bytes_count
+
+    def observe_proxy_fetch_duration(self, provider: str, duration_seconds: float) -> None:
+        with self._lock:
+            self._histograms[("proxy_fetch_duration_seconds", provider)].append(duration_seconds)
+
+    def set_proxy_circuit_state(self, provider: str, state: int) -> None:
+        with self._lock:
+            self._gauges[("proxy_circuit_state", provider)] = float(state)
+
+    def set_proxy_blocklist_size(self, provider: str, size: int) -> None:
+        with self._lock:
+            self._gauges[("proxy_blocklist_size", provider)] = float(size)
+
+    def get_all(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "counters": dict(self._counters),
+                "histograms": {k: list(v) for k, v in self._histograms.items()},
+                "gauges": dict(self._gauges),
+            }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counters.clear()
+            self._histograms.clear()
+            self._gauges.clear()
+
+
+_proxy_metrics: ProxyMetrics | None = None
+_metrics_lock = threading.Lock()
+
+
+def get_proxy_metrics() -> ProxyMetrics:
+    global _proxy_metrics
+    if _proxy_metrics is None:
+        with _metrics_lock:
+            if _proxy_metrics is None:
+                _proxy_metrics = ProxyMetrics()
+    return _proxy_metrics

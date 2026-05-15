@@ -36,14 +36,14 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | P2.4 | New `check_transcript_fetch` in `quotas.py` (bytes + per-min rate) | done | P2.3 | agent-p2.4-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
 | P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | done | P2.2, P1.4 | agent-p2.5-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | done | P2.3 | agent-p2.6-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
-| P2.7 | Tests: `test_quotas.py` extensions (proxy bytes limit, per-min rate, concurrency) | in_progress | P2.4, P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P2.7 | Tests: `test_quotas.py` extensions (proxy bytes limit, per-min rate, concurrency) | done | P2.4, P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
 ## Phase 3 — Pipeline Wiring
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
-| P3.1 | Thread `owner_id` into `fetch_transcripts(channel_id, owner_id, ...)` from `routes/pipeline.py` | in_progress | P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P3.2 | Quota pre-check in `routes/pipeline.py` returning 402-style block payload | in_progress | P2.4 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P3.1 | Thread `owner_id` into `fetch_transcripts(channel_id, owner_id, ...)` from `routes/pipeline.py` | done | P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P3.2 | Quota pre-check in `routes/pipeline.py` returning 402-style block payload | done | P2.4 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 | P3.3 | Worker housekeeping: blocklist cleanup + circuit-breaker probe in `backend/worker.py` | done | P1.2, P4.1 | agent-p3.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P3.4 | New route `GET /api/quota/proxy-usage` | done | P2.3 | agent-p3.4-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
 
@@ -60,25 +60,25 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
-| P5.1 | Block error surfacing in `ChannelInputPage.tsx` (proxy_bytes_limit modal) | in_progress | P3.2 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P5.2 | Quota meter component reading `/api/quota/proxy-usage` | todo | P3.4 | | | | |
-| P5.3 | Per-row "retrying with rotated proxy" status in `StudioPage.tsx` | in_progress | P3.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P5.4 | Tier comparison copy update (transcript bandwidth quota) | in_progress | P5.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P5.1 | Block error surfacing in `ChannelInputPage.tsx` (proxy_bytes_limit modal) | done | P3.2 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P5.2 | Quota meter component reading `/api/quota/proxy-usage` | in_progress | P3.4 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
+| P5.3 | Per-row "retrying with rotated proxy" status in `StudioPage.tsx` | done | P3.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P5.4 | Tier comparison copy update (transcript bandwidth quota) | done | P5.1 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
 ## Phase 6 — Observability
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P6.1 | Metrics in `backend/observability.py` (proxy_fetch_total, _bytes, _duration, circuit_state, blocklist_size) | done | P1.4, P4.2 | agent-p6.1-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
-| P6.2 | Daily summary log: bytes per provider/tier/top-10-users | in_progress | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P6.3 | Cost reconciliation script: compare `usage_events.proxy_bytes` sum vs provider invoice | in_progress | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P6.2 | Daily summary log: bytes per provider/tier/top-10-users | done | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
+| P6.3 | Cost reconciliation script: compare `usage_events.proxy_bytes` sum vs provider invoice | done | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
 ## Phase 7 — Rollout
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P7.1 | `USE_PROXY_POOL` feature flag in config; default off | done | P1.4 | agent-p7.1-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
-| P7.2 | Shadow mode: log intended proxy without using it | todo | P7.1 | | | | |
+| P7.2 | Shadow mode: log intended proxy without using it | in_progress | P7.1 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
 | P7.3 | 10% canary by `owner_id % 10 == 0` | todo | P3.1, P3.2 | | | | |
 | P7.4 | Full cutover; monitor 48h | todo | P7.3, P6.1 | | | | |
 | P7.5 | Remove direct-fetch path from `fetch_transcripts.py` | todo | P7.4 | | | | |
@@ -102,6 +102,8 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 - 2026-05-15 | main-session-2026-05-15 | P2.5 + P2.6 + P4.3 + P3.3 + P6.1 claimed together on a single combined branch (`proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined`) for a single combined PR. 3 worktree agents used: Agent A (P2.5+P2.6+P4.3 touching fetch_transcripts.py + quotas.py), Agent B (P3.3 touching worker.py), Agent C (P6.1 touching observability.py). Main session merged agents and opened PR #10. | User request: combine 5 parallel tasks into one PR like PR #9 pattern. P2.5/P2.6/P4.3 combined into one agent since all touch fetch_transcripts.py.
 - 2026-05-15 | main-session-2026-05-15 | P2.7 + P3.1 + P3.2 + P5.1 + P5.3 + P5.4 + P6.2 + P6.3 claimed together on combined branch (`proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined`). 3 worktree agents: Agent A (P2.7 tests), Agent B (P3.1+P3.2+P6.2+P6.3 backend), Agent C (P5.1+P5.3+P5.4 frontend). PR #11 opened. | User request: next batch of 8 tasks, same combined-PR pattern. After PR #9 + PR #10 merge: 32/33 (~97%).
 - 2026-05-15 | main-session-2026-05-15 | Post-PR-#9/#10/#11 review pass found 10 issues; 9 fixed in commit `832604a` on PR #11 branch. Critical: owner_id was never threaded into `fetch_with_retry` so P2.5 `record_usage` was dead code; fix threads owner_id + breaker through `fetch_transcripts → _fetch_with_gate → fetch_single_transcript → fetch_with_retry`. Also hardened breaker construction (returns None on local storage instead of crashing), short-circuited fetch_with_retry on all-providers-open, locked OwnerConcurrencyGate map, plugged reconcile end-of-month filter, added tier_key to QuotaDecision detail, hoisted observability imports, removed dup logger, rendered tier in modal, skipped worker housekeeping under local storage. Status table marking tasks `done` before merge was flagged as cosmetic only; corrected at merge time during this conflict resolution.
+- 2026-05-15 | agent-p5-2-p7-2-2026-05-15 | P5.2 + P7.2 claimed together on `proxy/p5-2-p7-2-combined`, PR #12. P5.2 mounts `ProxyQuotaMeter` above the transcripts work list (no pre-existing usage strip in StudioPage); refreshKey = `${pipelineStatus}-${done}` so it re-fetches on each completion. P7.2 lives at `fetch_single_transcript` (single acquire, no retry loop) rather than inside `fetch_with_retry`, since shadow does no real proxy work. | Spec said header strip "near other usage indicators" — none existed in StudioPage, so the fallback ("above the work list") applied. Shadow at the per-video level keeps `fetch_with_retry` semantics unchanged for the real-traffic path.
+- 2026-05-15 | user-2026-05-15 | Open Question resolutions (Webshare $6/mo; hard-fail on free-tier exhaustion; drop yt-dlp tier-2). | Webshare: different ASN = real failover when IPRoyal degrades, native lib support already wired. Hard-fail: matches the existing P5.1 modal, no silent stall, avoids new queue state. yt-dlp drop: proxy pool is primary now; yt-dlp adds binary dep + ToS risk for marginal benefit. P7.3+ implementations should reflect these.
 
 ## Blocker Log
 
@@ -115,7 +117,7 @@ Append blockers needing user input. Format: `YYYY-MM-DD | session | blocker | re
 
 ## Open Questions (from plan §Open Questions)
 
-- Webshare worth $6/mo minimum, or use second IPRoyal sub-account for IP diversity?
-- Free-tier proxy quota exhaustion: hard-fail or queue-and-retry-next-month?
-- Keep yt-dlp tier-2 fallback or drop?
+- ~~Webshare worth $6/mo minimum, or use second IPRoyal sub-account for IP diversity?~~ **Resolved 2026-05-15: Webshare $6/mo.** Different ASN = real failover; native lib support wired.
+- ~~Free-tier proxy quota exhaustion: hard-fail or queue-and-retry-next-month?~~ **Resolved 2026-05-15: hard-fail with upgrade CTA.** Matches existing P5.1 modal; no silent stall.
+- ~~Keep yt-dlp tier-2 fallback or drop?~~ **Resolved 2026-05-15: drop yt-dlp tier-2.** Proxy pool is primary; yt-dlp = binary dep + ToS risk for marginal benefit. Fallback chain: extension → proxy pool → Supadata → Deepgram.
 - Per-user concurrency: in-process v1 OK; revisit if scaling beyond 1 worker process.

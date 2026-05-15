@@ -718,6 +718,8 @@ export default function StudioPage({
     await reloadChannels({ preserveSelection: true })
   }
 
+  const [proxyQuotaBlocked, setProxyQuotaBlocked] = useState<{used: number; limit: number; tier: string} | null>(null)
+
   const handleRunPipeline = () => {
     if (!selectedChannel) return
     setActionError(null)
@@ -955,6 +957,7 @@ export default function StudioPage({
               onBackToVideos={() => setView('videos')}
               onProfileReady={() => setView('profile_ready')}
               onSwitchToSummaries={() => setView('summaries')}
+              onProxyQuotaBlocked={(detail) => setProxyQuotaBlocked(detail)}
             />
           )}
 
@@ -983,6 +986,31 @@ export default function StudioPage({
         </section>
       </main>
       {confirmDialog}
+      {proxyQuotaBlocked && (
+        <div className="studio-modal-overlay" onClick={() => setProxyQuotaBlocked(null)}>
+          <div className="studio-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="studio-modal-header">
+              <Icons.Warn />
+              <h3>Transcript proxy budget exhausted</h3>
+            </div>
+            <div className="studio-modal-body">
+              <p>You&apos;ve reached your transcript proxy budget for this month.</p>
+              <div className="studio-modal-stat">
+                <span>Used</span>
+                <b>{(proxyQuotaBlocked.used / 1024 / 1024).toFixed(1)} MB</b>
+              </div>
+              <div className="studio-modal-stat">
+                <span>Limit</span>
+                <b>{(proxyQuotaBlocked.limit / 1024 / 1024).toFixed(1)} MB</b>
+              </div>
+              <p className="studio-modal-hint">Upgrade your plan or wait until the next billing cycle to continue fetching transcripts via proxy.</p>
+            </div>
+            <div className="studio-modal-footer">
+              <button type="button" className="studio-btn primary" onClick={() => setProxyQuotaBlocked(null)}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2156,6 +2184,7 @@ function ProgressPanel({
   onBackToVideos,
   onProfileReady,
   onSwitchToSummaries,
+  onProxyQuotaBlocked,
 }: {
   channel: ChannelMeta
   stage: 'transcripts' | 'summaries'
@@ -2164,6 +2193,7 @@ function ProgressPanel({
   onBackToVideos: () => void
   onProfileReady: () => void
   onSwitchToSummaries: () => void
+  onProxyQuotaBlocked?: (detail: {used: number; limit: number; tier: string}) => void
 }) {
   const [baseVideos, setBaseVideos] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
@@ -2226,6 +2256,7 @@ function ProgressPanel({
     status: string
     subPct?: number
     subLabel: string
+    proxyBadge?: 'retrying' | 'exhausted'
   }
 
   const rows: Row[] = useMemo(() => {
@@ -2258,20 +2289,26 @@ function ProgressPanel({
     return base.map((r) => {
       let subLabel = 'Queued'
       let subPct: number | undefined
+      let proxyBadge: Row['proxyBadge']
+      const vstate = statusMap[r.id]
+      const errorText = typeof vstate?.error === 'string' ? vstate.error.toLowerCase() : ''
+      const isProxyError = errorText.includes('proxy') || errorText.includes('blocked')
       if (r.status === 'fetching') {
         subLabel = stage === 'summaries' ? 'Synthesizing themes' : 'Transcribing (ASR)'
         subPct = [62, 34, 9][fetchIdx] ?? 12
         fetchIdx += 1
+        if (isProxyError) proxyBadge = 'retrying'
       } else if (r.status === 'done') {
         subLabel = stage === 'summaries' ? 'Summarized' : (r.duration > 0 ? formatDuration(r.duration) : 'Done')
       } else if (r.status === 'failed') {
         subLabel = 'Failed'
+        if (isProxyError) proxyBadge = 'exhausted'
       } else if (r.status === 'unavailable') {
         subLabel = 'No transcript'
       } else if (r.status === 'skipped') {
         subLabel = 'Skipped'
       }
-      return { ...r, subLabel, subPct }
+      return { ...r, subLabel, subPct, proxyBadge }
     })
   }, [baseVideos, statusMap, stage, videoMetaMap])
 
@@ -2373,7 +2410,19 @@ function ProgressPanel({
     setControlError(null)
     const res = await api.pipelineStart(channel.channel_id)
     setStarting(false)
-    if (!res.ok) setControlError(res.error || 'Could not start transcription.')
+    if (!res.ok) {
+      const err = res.error || ''
+      const detail = (res as unknown as { data?: { reason?: string; proxy_bytes_used?: number; proxy_bytes_limit?: number; tier_key?: string } }).data
+      if (err === 'quota_exceeded' && detail?.reason === 'proxy_bytes_limit') {
+        onProxyQuotaBlocked?.({
+          used: detail.proxy_bytes_used ?? 0,
+          limit: detail.proxy_bytes_limit ?? 0,
+          tier: detail.tier_key ?? 'unknown',
+        })
+        return
+      }
+      setControlError(err || 'Could not start transcription.')
+    }
   }
 
   const handleRetryFailed = async () => {
@@ -2631,7 +2680,7 @@ function ProgressPanel({
                   </span>
                 </div>
                 <div className="studio-work-list">
-                  {rows.map((r) => {
+                   {rows.map((r) => {
                     const pill = STATUS_PILL[r.status] ?? STATUS_PILL.queued
                     return (
                       <div key={r.id} className={`studio-work-row is-${r.status}`}>
@@ -2643,6 +2692,17 @@ function ProgressPanel({
                           <span className="studio-work-pill-dot" />
                           {pill.label}
                         </span>
+                        {r.proxyBadge === 'retrying' && (
+                          <span className="studio-work-badge proxy-retrying">
+                            <span className="studio-spinner-sm" />
+                            Retrying with rotated proxy
+                          </span>
+                        )}
+                        {r.proxyBadge === 'exhausted' && (
+                          <span className="studio-work-badge proxy-exhausted">
+                            Proxy exhausted — will retry
+                          </span>
+                        )}
                       </div>
                     )
                   })}

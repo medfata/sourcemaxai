@@ -31,6 +31,12 @@ const STEPS = [
   { n: '03', title: 'Ask anything', body: 'Chat with the channel. Every answer cites the exact moment in a video.' },
 ]
 
+const TIERS = [
+  { name: 'Free', bandwidth: '100 MB', est: '~5k transcripts', highlight: false },
+  { name: 'Pro', bandwidth: '2 GB', est: '~100k transcripts', highlight: true },
+  { name: 'Business', bandwidth: '20 GB', est: 'Unlimited scale', highlight: false },
+]
+
 export default function ChannelInputPage({
   onResolved,
   initialUrl = '',
@@ -218,6 +224,42 @@ export default function ChannelInputPage({
               <span className="font-mono text-[12px] text-ink-300 dark:text-white/30">{step.n}</span>
               <h3 className="mt-4 font-display text-[26px] tracking-tight text-ink-900 dark:text-cream">{step.title}</h3>
               <p className="mt-2 text-[14px] text-ink-500 dark:text-white/60 leading-[1.6]">{step.body}</p>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+
+      {/* Transcript bandwidth by tier */}
+      <div className="relative max-w-6xl mx-auto px-6 pb-24">
+        <div className="text-center mb-12">
+          <span className="text-[11px] uppercase tracking-[0.22em] text-ink-400">Transcript proxy bandwidth</span>
+          <h2 className="mt-3 text-[32px] sm:text-[44px] tracking-tighter font-display text-ink-900 dark:text-cream">
+            Monthly bandwidth per tier
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {TIERS.map((tier) => (
+            <motion.div
+              key={tier.name}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-50px' }}
+              transition={{ duration: 0.5 }}
+              className={`relative p-6 rounded-3xl backdrop-blur-md border transition-all hover:-translate-y-0.5 ${
+                tier.highlight
+                  ? 'bg-ink-900/95 dark:bg-white/10 border-ink-900/20 dark:border-white/20 shadow-lg'
+                  : 'bg-white/60 dark:bg-white/[0.03] border-black/[0.06] dark:border-white/10 hover:border-ink-900/20 dark:hover:border-white/20'
+              }`}
+            >
+              <span className={`text-[13px] font-semibold tracking-wide ${tier.highlight ? 'text-cream dark:text-cream' : 'text-ink-400 dark:text-white/40'}`}>
+                {tier.name}
+              </span>
+              <div className={`mt-3 font-display text-[36px] tracking-tight ${tier.highlight ? 'text-cream' : 'text-ink-900 dark:text-cream'}`}>
+                {tier.bandwidth}
+              </div>
+              <p className={`mt-2 text-[14px] leading-[1.6] ${tier.highlight ? 'text-white/70' : 'text-ink-500 dark:text-white/60'}`}>
+                {tier.est}
+              </p>
             </motion.div>
           ))}
         </div>

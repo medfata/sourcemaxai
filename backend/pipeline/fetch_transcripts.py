@@ -5,6 +5,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from backend.config import load_runtime_config
+from backend.pipeline.proxy_pool import ProxyPool, build_proxy_pool
 from backend.pipeline.schema_versions import (
     TRANSCRIPT_SCHEMA_VERSION,
     get_transcript_stale_reasons,
@@ -22,8 +24,18 @@ from youtube_transcript_api import (
     TranscriptsDisabled,
     YouTubeTranscriptApi,
 )
+from youtube_transcript_api.proxies import GenericProxyConfig
+
+try:
+    from youtube_transcript_api import IpBlocked, RequestBlocked
+
+    _BLOCK_EXCEPTIONS: tuple[type[Exception], ...] = (RequestBlocked, IpBlocked)
+except ImportError:
+    _BLOCK_EXCEPTIONS = tuple()
 
 WORKERS = int(os.environ.get("TRANSCRIPT_WORKERS", "8"))
+
+MAX_ATTEMPTS = load_runtime_config().proxy.max_attempts
 
 BRACKET_TAGS = re.compile(
     r"\[(Music|Applause|Laughter|Inaudible|inaudible|music|applause|laughter)\]",
@@ -37,6 +49,48 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def _list_transcripts_direct(video_id: str):
+    return YouTubeTranscriptApi().list(video_id)
+
+
+def fetch_with_retry(
+    video_id: str,
+    *,
+    pool: ProxyPool,
+    max_attempts: int,
+    owner_id: str | None = None,
+):
+    """Acquire a proxy session per attempt and return a transcript list, retrying on IP blocks.
+
+    Returns the `TranscriptList` on success, or a dict `{"status": "unavailable" | "failed", ...}`
+    when the caller should short-circuit without further proxy attempts.
+    """
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        provider, session_id = pool.acquire(video_id, attempt)
+        url = pool.proxy_url(provider, session_id)
+        cfg = GenericProxyConfig(http_url=url, https_url=url)
+        try:
+            return YouTubeTranscriptApi(proxy_config=cfg).list(video_id)
+        except (TranscriptsDisabled, NoTranscriptFound):
+            return {"video_id": video_id, "status": "unavailable"}
+        except _BLOCK_EXCEPTIONS as exc:
+            pool.mark_blocked(provider, session_id, str(exc) or exc.__class__.__name__)
+            last_error = exc
+            continue
+        except Exception as exc:
+            last_error = exc
+            print(f"[transcript] attempt {attempt} failed for {video_id}: {exc}")
+            continue
+
+    return {
+        "video_id": video_id,
+        "status": "failed",
+        "error": "all_proxies_blocked",
+        "last_error": str(last_error) if last_error else None,
+    }
+
+
 def fetch_single_transcript(
     video_id: str,
     title: str,
@@ -45,6 +99,8 @@ def fetch_single_transcript(
     channel_id: str,
     channel_dir: Path,
     on_progress=None,
+    *,
+    pool: ProxyPool | None = None,
 ) -> dict:
     transcript_path = channel_dir / "transcripts" / f"{video_id}.json"
     if transcript_path.exists():
@@ -64,8 +120,33 @@ def fetch_single_transcript(
         on_progress({"video_id": video_id, "status": "fetching"})
 
     try:
-        api = YouTubeTranscriptApi()
-        transcript_list = api.list(video_id)
+        if pool is None:
+            transcript_list = _list_transcripts_direct(video_id)
+        else:
+            outcome = fetch_with_retry(
+                video_id,
+                pool=pool,
+                max_attempts=MAX_ATTEMPTS,
+            )
+            if isinstance(outcome, dict):
+                if outcome.get("status") == "unavailable":
+                    data = {
+                        "schema_version": TRANSCRIPT_SCHEMA_VERSION,
+                        "video_id": video_id,
+                        "title": title,
+                        "upload_date": upload_date,
+                        "duration_seconds": duration,
+                        "transcript_text": "",
+                        "word_count": 0,
+                        "source": "unavailable",
+                        "segments": [],
+                    }
+                    write_json(transcript_path, data)
+                    save_transcript(channel_id, "manual", video_id, data)
+                    return {"video_id": video_id, "status": "unavailable", "data": data}
+                return outcome
+            transcript_list = outcome
+
         try:
             transcript = transcript_list.find_manually_created_transcript(["en"])
             source = "manual"
@@ -123,7 +204,11 @@ def fetch_single_transcript(
         return {"video_id": video_id, "status": "failed", "error": str(exc)}
 
 
-def fetch_transcripts(channel_id: str, on_progress=None) -> dict:
+def fetch_transcripts(
+    channel_id: str,
+    owner_id: str | None = None,
+    on_progress=None,
+) -> dict:
     channel_dir = get_channel_dir(channel_id)
     transcripts_dir = channel_dir / "transcripts"
     transcripts_dir.mkdir(parents=True, exist_ok=True)
@@ -147,6 +232,8 @@ def fetch_transcripts(channel_id: str, on_progress=None) -> dict:
             )
         )
 
+    pool = build_proxy_pool()
+
     results = []
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         future_to_vid = {
@@ -159,6 +246,7 @@ def fetch_transcripts(channel_id: str, on_progress=None) -> dict:
                 channel_id,
                 channel_dir,
                 on_progress,
+                pool=pool,
             ): vid
             for vid, title, upload_date, duration in tasks
         }

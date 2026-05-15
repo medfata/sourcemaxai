@@ -34,8 +34,8 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | P2.2 | Migration: extend `usage_events` (`proxy_bytes`, `proxy_provider`) | done | — | agent-p2.2-2026-05-15 | proxy/p2-2-usage-events-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/6 |
 | P2.3 | `Quota` dataclass + `SupabaseQuotaStore` updates for new columns | done | P2.1 | agent-p2.3-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
 | P2.4 | New `check_transcript_fetch` in `quotas.py` (bytes + per-min rate) | done | P2.3 | agent-p2.4-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
-| P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | in_progress | P2.2, P1.4 | agent-p2.5-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
-| P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | in_progress | P2.3 | agent-p2.6-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
+| P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | done | P2.2, P1.4 | agent-p2.5-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
+| P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | done | P2.3 | agent-p2.6-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P2.7 | Tests: `test_quotas.py` extensions (proxy bytes limit, per-min rate, concurrency) | in_progress | P2.4, P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
 ## Phase 3 — Pipeline Wiring
@@ -44,7 +44,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P3.1 | Thread `owner_id` into `fetch_transcripts(channel_id, owner_id, ...)` from `routes/pipeline.py` | in_progress | P2.6 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 | P3.2 | Quota pre-check in `routes/pipeline.py` returning 402-style block payload | in_progress | P2.4 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
-| P3.3 | Worker housekeeping: blocklist cleanup + circuit-breaker probe in `backend/worker.py` | in_progress | P1.2, P4.1 | agent-p3.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
+| P3.3 | Worker housekeeping: blocklist cleanup + circuit-breaker probe in `backend/worker.py` | done | P1.2, P4.1 | agent-p3.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P3.4 | New route `GET /api/quota/proxy-usage` | done | P2.3 | agent-p3.4-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
 
 ## Phase 4 — Circuit Breaker
@@ -53,7 +53,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P4.1 | Migration: `proxy_circuit_state` table | done | — | agent-p4.1-2026-05-15 | proxy/p4-1-circuit-state-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/7 |
 | P4.2 | `CircuitBreaker` class in `proxy_pool.py` (closed/half_open/open transitions) | done | P4.1, P1.2 | agent-p4.2-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
-| P4.3 | Wire breaker into `fetch_with_retry` (skip provider when open) | in_progress | P4.2, P1.4 | agent-p4.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
+| P4.3 | Wire breaker into `fetch_with_retry` (skip provider when open) | done | P4.2, P1.4 | agent-p4.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P4.4 | Tests: breaker opens after N failures, half-open probe behavior | done | P4.2 | agent-p4.4-2026-05-15 | proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/9 |
 
 ## Phase 5 — Frontend
@@ -69,7 +69,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
-| P6.1 | Metrics in `backend/observability.py` (proxy_fetch_total, _bytes, _duration, circuit_state, blocklist_size) | in_progress | P1.4, P4.2 | agent-p6.1-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
+| P6.1 | Metrics in `backend/observability.py` (proxy_fetch_total, _bytes, _duration, circuit_state, blocklist_size) | done | P1.4, P4.2 | agent-p6.1-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/10 |
 | P6.2 | Daily summary log: bytes per provider/tier/top-10-users | in_progress | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 | P6.3 | Cost reconciliation script: compare `usage_events.proxy_bytes` sum vs provider invoice | in_progress | P2.5 | agent-batch2-2026-05-15 | proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/11 |
 
@@ -101,6 +101,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 - 2026-05-15 | main-session-2026-05-15 | P1.6 + P2.4 + P3.4 + P4.4 + P7.1 claimed together on a single combined branch (`proxy/p1-6-p2-4-p3-4-p4-4-p7-1-combined`) for a single combined PR. Each sub-task is implemented by its own worktree agent; main session merges agent branches and opens one PR. | User request: combine 5 parallel agents into one PR like PR #8 pattern.
 - 2026-05-15 | main-session-2026-05-15 | P2.5 + P2.6 + P4.3 + P3.3 + P6.1 claimed together on a single combined branch (`proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined`) for a single combined PR. 3 worktree agents used: Agent A (P2.5+P2.6+P4.3 touching fetch_transcripts.py + quotas.py), Agent B (P3.3 touching worker.py), Agent C (P6.1 touching observability.py). Main session merged agents and opened PR #10. | User request: combine 5 parallel tasks into one PR like PR #9 pattern. P2.5/P2.6/P4.3 combined into one agent since all touch fetch_transcripts.py.
 - 2026-05-15 | main-session-2026-05-15 | P2.7 + P3.1 + P3.2 + P5.1 + P5.3 + P5.4 + P6.2 + P6.3 claimed together on combined branch (`proxy/p1-6-p2-7-p3-1-p3-2-p4-4-p5-1-p5-3-p5-4-p6-2-p6-3-combined`). 3 worktree agents: Agent A (P2.7 tests), Agent B (P3.1+P3.2+P6.2+P6.3 backend), Agent C (P5.1+P5.3+P5.4 frontend). PR #11 opened. | User request: next batch of 8 tasks, same combined-PR pattern. After PR #9 + PR #10 merge: 32/33 (~97%).
+- 2026-05-15 | main-session-2026-05-15 | Post-PR-#9/#10/#11 review pass found 10 issues; 9 fixed in commit `832604a` on PR #11 branch. Critical: owner_id was never threaded into `fetch_with_retry` so P2.5 `record_usage` was dead code; fix threads owner_id + breaker through `fetch_transcripts → _fetch_with_gate → fetch_single_transcript → fetch_with_retry`. Also hardened breaker construction (returns None on local storage instead of crashing), short-circuited fetch_with_retry on all-providers-open, locked OwnerConcurrencyGate map, plugged reconcile end-of-month filter, added tier_key to QuotaDecision detail, hoisted observability imports, removed dup logger, rendered tier in modal, skipped worker housekeeping under local storage. Status table marking tasks `done` before merge was flagged as cosmetic only; corrected at merge time during this conflict resolution.
 
 ## Blocker Log
 
@@ -111,7 +112,6 @@ Append blockers needing user input. Format: `YYYY-MM-DD | session | blocker | re
 - 2026-05-15 | agent-p2.1-2026-05-15 | `gh` CLI not authed; could not run `gh pr create` for P2.1. | resolved | User ran `gh auth login` 2026-05-15. PR #5 opened by main session and merged.
 - 2026-05-15 | agent-p2.2-2026-05-15 | `gh` CLI not authed; could not run `gh pr create` for P2.2. | resolved | User ran `gh auth login` 2026-05-15. PR #6 opened by main session and merged.
 - 2026-05-15 | agent-p4.1-2026-05-15 | `gh` CLI not authed; could not run `gh pr create` for P4.1. | resolved | User ran `gh auth login` 2026-05-15. PR #7 opened by main session and merged.
-- 
 
 ## Open Questions (from plan §Open Questions)
 

@@ -22,8 +22,8 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | P1.1 | Add `proxy_blocklist` migration (SQL in plan §1.2) | done | — | agent-p1.1-retry-2026-05-15 | proxy/p1-1-blocklist-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/3 |
 | P1.2 | New module `backend/pipeline/proxy_pool.py` (`ProxyConfig`, `ProxyPool`, `BlocklistStore`) | done | P1.1 | agent-p1.2-2026-05-15 | proxy/p1-2-proxy-pool | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/4 |
 | P1.3 | Add proxy env vars to `backend/config.py` + 3 env example files | done | — | agent-p1.3-retry-2026-05-15 | proxy/p1-3-config-env-vars | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/2 |
-| P1.4 | Refactor `fetch_single_transcript` to use `fetch_with_retry(pool, ...)` | in_progress | P1.2, P1.3 | agent-p1.4-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
-| P1.5 | Tests: `backend/tests/test_proxy_pool.py` (rotation, blocklist, failover) | in_progress | P1.2 | agent-p1.5-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
+| P1.4 | Refactor `fetch_single_transcript` to use `fetch_with_retry(pool, ...)` | done | P1.2, P1.3 | agent-p1.4-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
+| P1.5 | Tests: `backend/tests/test_proxy_pool.py` (rotation, blocklist, failover) | done | P1.2 | agent-p1.5-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
 | P1.6 | Tests: extend `test_fetch_transcripts.py` (mock IpBlocked → retry → success) | todo | P1.4 | | | | |
 
 ## Phase 2 — Per-User Fair-Use
@@ -32,7 +32,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P2.1 | Migration: extend `plan_tiers` (`proxy_bytes_per_month`, `proxy_requests_per_minute`, `transcript_concurrency`) | done | — | agent-p2.1-2026-05-15 | proxy/p2-1-plan-tiers-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/5 |
 | P2.2 | Migration: extend `usage_events` (`proxy_bytes`, `proxy_provider`) | done | — | agent-p2.2-2026-05-15 | proxy/p2-2-usage-events-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/6 |
-| P2.3 | `Quota` dataclass + `SupabaseQuotaStore` updates for new columns | in_progress | P2.1 | agent-p2.3-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
+| P2.3 | `Quota` dataclass + `SupabaseQuotaStore` updates for new columns | done | P2.1 | agent-p2.3-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
 | P2.4 | New `check_transcript_fetch` in `quotas.py` (bytes + per-min rate) | todo | P2.3 | | | | |
 | P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | todo | P2.2, P1.4 | | | | |
 | P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | todo | P2.3 | | | | |
@@ -52,7 +52,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P4.1 | Migration: `proxy_circuit_state` table | done | — | agent-p4.1-2026-05-15 | proxy/p4-1-circuit-state-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/7 |
-| P4.2 | `CircuitBreaker` class in `proxy_pool.py` (closed/half_open/open transitions) | in_progress | P4.1, P1.2 | agent-p4.2-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
+| P4.2 | `CircuitBreaker` class in `proxy_pool.py` (closed/half_open/open transitions) | done | P4.1, P1.2 | agent-p4.2-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
 | P4.3 | Wire breaker into `fetch_with_retry` (skip provider when open) | todo | P4.2, P1.4 | | | | |
 | P4.4 | Tests: breaker opens after N failures, half-open probe behavior | todo | P4.2 | | | | |
 

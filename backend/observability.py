@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 STANDARD_LOG_ATTRS = {
@@ -152,3 +152,65 @@ def get_proxy_metrics() -> ProxyMetrics:
             if _proxy_metrics is None:
                 _proxy_metrics = ProxyMetrics()
     return _proxy_metrics
+
+
+logger = logging.getLogger(__name__)
+
+
+def log_daily_proxy_summary(quota_store: Any) -> dict[str, Any]:
+    """Log daily proxy usage summary: bytes per provider, per tier, top-10 users."""
+    from backend.quotas import LocalQuotaStore, SupabaseQuotaStore
+
+    if isinstance(quota_store, LocalQuotaStore):
+        return {}
+
+    if not isinstance(quota_store, SupabaseQuotaStore):
+        return {}
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    backend = quota_store.backend
+
+    rows = backend._select(
+        "usage_events",
+        select="owner_id,proxy_provider,proxy_bytes",
+        filters={
+            "event_type": quota_store._eq("transcript_fetch"),
+            "created_at": f"gte.{cutoff}",
+            "proxy_bytes": "gt.0",
+        },
+        limit=10000,
+    )
+
+    by_provider: dict[str, int] = {}
+    by_user: dict[str, int] = {}
+    total_bytes = 0
+
+    for row in rows:
+        provider = str(row.get("proxy_provider") or "unknown")
+        owner = str(row.get("owner_id") or "unknown")
+        b = int(row.get("proxy_bytes") or 0)
+        by_provider[provider] = by_provider.get(provider, 0) + b
+        by_user[owner] = by_user.get(owner, 0) + b
+        total_bytes += b
+
+    tier_rows = backend._select("user_quotas", select="owner_id,tier_key", limit=10000)
+    tier_map = {str(r["owner_id"]): str(r["tier_key"]) for r in tier_rows if r.get("owner_id")}
+
+    by_tier: dict[str, int] = {}
+    for owner, b in by_user.items():
+        tier = tier_map.get(owner, "unknown")
+        by_tier[tier] = by_tier.get(tier, 0) + b
+
+    top_users = sorted(by_user.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    summary = {
+        "period": "last_24h",
+        "total_proxy_bytes": total_bytes,
+        "by_provider": by_provider,
+        "by_tier": by_tier,
+        "top_users": [{"owner_id": u, "proxy_bytes": b} for u, b in top_users],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    logger.info("daily_proxy_summary: %s", json.dumps(summary, default=str))
+    return summary

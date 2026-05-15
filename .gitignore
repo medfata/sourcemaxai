@@ -64,3 +64,4 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+.claude/

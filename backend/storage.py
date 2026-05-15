@@ -615,10 +615,17 @@ class LocalStorageBackend(StorageBackend):
             run_state = self.read_json(entry / "pipeline_run_state.json")
             out.append(
                 {
+                    "kind": meta.get("kind") or "channel",
                     "channel_id": channel_id,
                     "channel_name": meta.get("channel_name") or channel_id,
                     "channel_handle": meta.get("channel_handle"),
                     "avatar_url": meta.get("avatar_url"),
+                    "subscriber_count": meta.get("subscriber_count"),
+                    "total_video_count": meta.get("total_video_count"),
+                    "playlist_id": meta.get("playlist_id"),
+                    "playlist_title": meta.get("playlist_title"),
+                    "owner_channel_id": meta.get("owner_channel_id"),
+                    "owner_channel_name": meta.get("owner_channel_name"),
                     "video_count": video_count,
                     "has_profile": isinstance(profile, dict),
                     "latest_run_status": (
@@ -1089,12 +1096,19 @@ class SupabaseStorageBackend(StorageBackend):
     @staticmethod
     def _channel_meta(row: dict[str, Any]) -> dict[str, Any]:
         return {
+            "kind": row.get("kind") or "channel",
             "channel_id": row.get("youtube_channel_id"),
             "youtube_channel_id": row.get("youtube_channel_id"),
             "storage_channel_id": row.get("id"),
             "channel_name": row.get("channel_name"),
             "channel_handle": row.get("channel_handle"),
             "avatar_url": row.get("avatar_url"),
+            "subscriber_count": row.get("subscriber_count"),
+            "total_video_count": row.get("total_video_count"),
+            "playlist_id": row.get("playlist_id"),
+            "playlist_title": row.get("playlist_title"),
+            "owner_channel_id": row.get("owner_channel_id"),
+            "owner_channel_name": row.get("owner_channel_name"),
         }
 
     @staticmethod
@@ -1201,6 +1215,13 @@ class SupabaseStorageBackend(StorageBackend):
             "channel_name": channel_name,
             "channel_handle": data.get("channel_handle"),
             "avatar_url": data.get("avatar_url"),
+            "subscriber_count": data.get("subscriber_count"),
+            "total_video_count": data.get("total_video_count"),
+            "kind": data.get("kind") or "channel",
+            "playlist_id": data.get("playlist_id"),
+            "playlist_title": data.get("playlist_title"),
+            "owner_channel_id": data.get("owner_channel_id"),
+            "owner_channel_name": data.get("owner_channel_name"),
         }
         rows = self._upsert(
             "channels",
@@ -1669,10 +1690,17 @@ class SupabaseStorageBackend(StorageBackend):
             latest = latest_runs[0] if latest_runs else {}
             out.append(
                 {
+                    "kind": row.get("kind") or "channel",
                     "channel_id": row.get("youtube_channel_id"),
                     "channel_name": row.get("channel_name"),
                     "channel_handle": row.get("channel_handle"),
                     "avatar_url": row.get("avatar_url"),
+                    "subscriber_count": row.get("subscriber_count"),
+                    "total_video_count": row.get("total_video_count"),
+                    "playlist_id": row.get("playlist_id"),
+                    "playlist_title": row.get("playlist_title"),
+                    "owner_channel_id": row.get("owner_channel_id"),
+                    "owner_channel_name": row.get("owner_channel_name"),
                     "video_count": video_count,
                     "has_profile": bool(profiles),
                     "latest_run_status": latest.get("status"),

@@ -2183,6 +2183,36 @@
 .studio-cost-cta:hover { background: var(--accent-2); border-color: var(--accent-2); }
 .studio-cost-cta:disabled { opacity: 0.5; cursor: default; }
 
+.studio-progress-head-actions {
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.studio-summarize-glow {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 18px rgba(229, 50, 43, 0.35);
+}
+.studio-summarize-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.55) 50%,
+    rgba(255,255,255,0) 100%);
+  transform: translateX(-100%);
+  animation: studioSummarizeSweep 1.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes studioSummarizeSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-summarize-glow { box-shadow: none; }
+  .studio-summarize-glow::after { animation: none; }
+}
+
 /* Inline error card */
 .studio-error-card {
   display: grid;
@@ -2218,6 +2248,7 @@
   .studio-progress-panel { padding: 18px 16px 14px; gap: 18px; }
   .studio-progress-head { grid-template-columns: 1fr; }
   .studio-progress-cancel { justify-self: start; margin-top: 2px; }
+  .studio-progress-head-actions { justify-self: start; margin-top: 4px; }
   .studio-progress-title { font-size: 19px; }
   .studio-progress-counter-done { font-size: 44px; }
   .studio-progress-counter-pct { font-size: 24px; }
@@ -3453,6 +3484,11 @@
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--ink-3);
+}
+.studio-vids-channel-stat {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-feature-settings: "tnum";
 }
 .studio-vids-channel-meta {
   margin-top: 3px;

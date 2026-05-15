@@ -514,10 +514,17 @@ def test_channels_dashboard_lists_owned_channels(client):
     assert body["ok"] is True
     assert body["data"]["channels"] == [
         {
+            "kind": "channel",
             "channel_id": channel_id,
             "channel_name": "Test Channel",
             "channel_handle": "@test",
             "avatar_url": "http://example.com/avatar.jpg",
+            "subscriber_count": None,
+            "total_video_count": None,
+            "playlist_id": None,
+            "playlist_title": None,
+            "owner_channel_id": None,
+            "owner_channel_name": None,
             "video_count": 2,
             "has_profile": True,
             "latest_run_status": "completed",

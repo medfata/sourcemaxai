@@ -16,21 +16,35 @@ class ApiResponse(BaseModel, Generic[T]):
 
 
 class ChannelMeta(BaseModel):
-    """Metadata for a YouTube channel."""
+    """Metadata for a YouTube channel or single-playlist scope."""
 
+    kind: str = "channel"
     channel_id: str
     channel_name: str
     channel_handle: str | None = None
     avatar_url: str | None = None
+    subscriber_count: int | None = None
+    total_video_count: int | None = None
+    playlist_id: str | None = None
+    playlist_title: str | None = None
+    owner_channel_id: str | None = None
+    owner_channel_name: str | None = None
 
 
 class ChannelSummary(BaseModel):
     """Channel dashboard row with aggregated state."""
 
+    kind: str = "channel"
     channel_id: str
     channel_name: str
     channel_handle: str | None = None
     avatar_url: str | None = None
+    subscriber_count: int | None = None
+    total_video_count: int | None = None
+    playlist_id: str | None = None
+    playlist_title: str | None = None
+    owner_channel_id: str | None = None
+    owner_channel_name: str | None = None
     video_count: int = 0
     has_profile: bool = False
     latest_run_status: str | None = None

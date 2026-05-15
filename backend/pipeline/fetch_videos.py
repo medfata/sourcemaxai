@@ -1,10 +1,15 @@
 """Fetch video listings from a YouTube channel using yt-dlp."""
 
 import json
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+
+
+_HANDLE_RE = re.compile(r"^@[A-Za-z0-9._-]+$")
+_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 
 
 def _run_ytdlp(args: list[str]) -> str:
@@ -43,6 +48,42 @@ def _channel_id_from_url(url: Any) -> str:
     if len(path_parts) >= 2 and path_parts[0] == "channel" and _is_channel_id(path_parts[1]):
         return path_parts[1]
     return ""
+
+
+def _normalize_input(url: str) -> str:
+    """Accept bare ``@handle`` and rewrite to a YouTube URL.
+
+    All other inputs returned unchanged. Empty/whitespace returned as ``""``.
+    """
+    text = (url or "").strip()
+    if not text:
+        return ""
+    if _HANDLE_RE.match(text):
+        return f"https://www.youtube.com/{text}"
+    return text
+
+
+def _extract_playlist_id(url: str) -> str | None:
+    """Return playlist id from ``?list=PL...``-style URLs, ``None`` otherwise.
+
+    Rejects auto-generated mix radios (``RD`` prefix) and channel uploads
+    (``UU`` prefix) so they fall through to channel resolution instead.
+    """
+    text = (url or "").strip()
+    if not text:
+        return None
+    parsed = urlparse(text)
+    host = (parsed.hostname or "").lower()
+    if host not in _YT_HOSTS:
+        return None
+    qs = parse_qs(parsed.query or "")
+    list_vals = qs.get("list") or []
+    if not list_vals:
+        return None
+    pid = (list_vals[0] or "").strip()
+    if not pid or pid.startswith("RD") or pid.startswith("UU"):
+        return None
+    return pid
 
 
 def _channel_handle_from_url(url: Any) -> str:
@@ -129,12 +170,43 @@ def _metadata_from_json(stdout: str) -> dict[str, str]:
     return metadata
 
 
-def resolve_channel(url: str) -> dict[str, Any]:
-    """Resolve a YouTube URL to channel metadata.
+def _pick_avatar_from_thumbnails(thumbnails: Any) -> str | None:
+    """Pick the largest square avatar URL from a yt-dlp thumbnails array."""
+    if not isinstance(thumbnails, list) or not thumbnails:
+        return None
+    avatars = [t for t in thumbnails if isinstance(t, dict) and t.get("url")]
+    if not avatars:
+        return None
+    # Prefer thumbnails tagged as avatar/profile (yt-dlp uses ids like "avatar_uncropped").
+    tagged = [
+        t for t in avatars
+        if "avatar" in str(t.get("id") or "").lower()
+        or "avatar" in str(t.get("preference") or "").lower()
+    ]
+    pool = tagged or avatars
+    pool_sorted = sorted(
+        pool,
+        key=lambda t: int(t.get("width") or 0) * int(t.get("height") or 0),
+    )
+    return str(pool_sorted[-1].get("url") or "") or None
 
-    Accepts channel URLs (@handle, /c/, /channel/), playlist URLs, and video URLs.
-    Returns {"channel_id", "channel_name", "channel_handle", "avatar_url"}.
+
+def resolve_channel(url: str) -> dict[str, Any]:
+    """Resolve a YouTube URL/handle to channel or playlist metadata.
+
+    Accepts channel URLs (``@handle``, ``/c/``, ``/channel/``), bare handles
+    (``@name``), playlist URLs (``?list=PL...``), and video URLs. Playlist
+    URLs are dispatched to :func:`resolve_playlist` and returned with
+    ``kind='playlist'``; everything else returns ``kind='channel'``.
     """
+    normalized = _normalize_input(url)
+    if not normalized:
+        raise RuntimeError("Empty URL")
+
+    playlist_id = _extract_playlist_id(normalized)
+    if playlist_id:
+        return resolve_playlist(normalized)
+
     # Resolve through the flat channel listing so yt-dlp does not inspect a
     # video format when all we need is channel metadata.
     stdout = _run_ytdlp(
@@ -149,7 +221,7 @@ def resolve_channel(url: str) -> dict[str, Any]:
             "%(channel_url)s",
             "--playlist-items",
             "1",
-            url,
+            normalized,
         ]
     )
     lines = [_clean_ytdlp_value(line) for line in stdout.strip().splitlines()]
@@ -167,7 +239,7 @@ def resolve_channel(url: str) -> dict[str, Any]:
                 "--dump-single-json",
                 "--playlist-items",
                 "1",
-                url,
+                normalized,
             ]
         )
         json_metadata = _metadata_from_json(info_stdout)
@@ -185,35 +257,153 @@ def resolve_channel(url: str) -> dict[str, Any]:
     channel_url = metadata["channel_url"] or f"https://www.youtube.com/channel/{channel_id}"
 
     # Extract handle from URL if present
-    handle = _channel_handle_from_url(channel_url) or _channel_handle_from_url(url) or None
+    handle = _channel_handle_from_url(channel_url) or _channel_handle_from_url(normalized) or None
 
-    # Try to get avatar via --dump-json on the channel page (one item)
+    # Fetch channel envelope (avatar, subscriber count) AND the /videos tab
+    # count in parallel — both are independent yt-dlp subprocess calls and
+    # account for the bulk of POST /api/channel latency. The home page's
+    # playlist_count is the featured-section count, not total videos, so we
+    # still pull total_video_count from the /videos tab.
     avatar_url: str | None = None
-    try:
-        info_stdout = _run_ytdlp(
-            [
-                "--flat-playlist",
-                "--dump-json",
-                "--playlist-items",
-                "1",
-                channel_url,
-            ]
-        )
-        first_line = info_stdout.strip().splitlines()[0]
-        info = json.loads(first_line)
-        # thumbnails array often has avatar at the channel level
-        thumbnails = info.get("thumbnails", [])
-        if thumbnails:
-            avatar_url = thumbnails[-1].get("url")
-    except Exception:
-        pass
+    subscriber_count: int | None = None
+    total_video_count: int | None = None
+
+    def _fetch_envelope() -> dict[str, Any]:
+        try:
+            stdout = _run_ytdlp(
+                [
+                    "--flat-playlist",
+                    "--dump-single-json",
+                    "--playlist-items",
+                    "1",
+                    channel_url,
+                ]
+            )
+            return json.loads(stdout) if stdout.strip() else {}
+        except Exception:
+            return {}
+
+    def _fetch_videos_count() -> int:
+        try:
+            return fetch_tab_count(channel_videos_url(channel_url))
+        except Exception:
+            return 0
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        envelope_future = pool.submit(_fetch_envelope)
+        count_future = pool.submit(_fetch_videos_count)
+        info = envelope_future.result()
+        videos_count = count_future.result()
+
+    if isinstance(info, dict):
+        avatar_url = _pick_avatar_from_thumbnails(info.get("thumbnails"))
+        followers = info.get("channel_follower_count")
+        if isinstance(followers, (int, float)) and followers > 0:
+            subscriber_count = int(followers)
+    if videos_count > 0:
+        total_video_count = videos_count
 
     return {
+        "kind": "channel",
         "channel_id": channel_id,
         "channel_name": channel_name,
         "channel_handle": handle,
         "channel_url": channel_url,
         "avatar_url": avatar_url,
+        "subscriber_count": subscriber_count,
+        "total_video_count": total_video_count,
+        "playlist_id": None,
+        "playlist_title": None,
+    }
+
+
+def resolve_playlist(url: str) -> dict[str, Any]:
+    """Resolve a playlist URL to playlist-as-channel metadata.
+
+    Returns a channel-shaped dict with ``kind='playlist'``. The virtual
+    ``channel_id`` is the playlist id (``PL...``), ``channel_name`` is the
+    playlist title, and ``playlist_id`` / ``playlist_title`` are populated
+    so the UI can label the entity correctly.
+    """
+    playlist_id = _extract_playlist_id(url)
+    if not playlist_id:
+        raise RuntimeError("Could not parse playlist id from URL")
+
+    canonical_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+
+    info_stdout = _run_ytdlp(
+        [
+            "--flat-playlist",
+            "--dump-single-json",
+            "--playlist-items",
+            "1",
+            canonical_url,
+        ]
+    )
+    info: dict[str, Any] = {}
+    if info_stdout.strip():
+        info = json.loads(info_stdout)
+
+    playlist_title = _clean_ytdlp_value(info.get("title")) or playlist_id
+
+    # The playlist envelope's ``title`` is the playlist title, not the owning
+    # channel name — only treat envelope channel/uploader fields as owner info.
+    owner = {
+        "channel_id": _clean_ytdlp_value(info.get("channel_id"))
+            if _is_channel_id(_clean_ytdlp_value(info.get("channel_id"))) else "",
+        "channel_name": _clean_ytdlp_value(info.get("channel"))
+            or _clean_ytdlp_value(info.get("uploader")),
+        "channel_url": _clean_ytdlp_value(
+            info.get("channel_url") or info.get("uploader_url")
+        ),
+    }
+    if not owner["channel_id"] or not owner["channel_name"]:
+        entries = info.get("entries") if isinstance(info, dict) else None
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                em = _metadata_from_info(entry)
+                if not owner["channel_id"] and em["channel_id"]:
+                    owner["channel_id"] = em["channel_id"]
+                if not owner["channel_name"] and em["channel_name"]:
+                    owner["channel_name"] = em["channel_name"]
+                if not owner["channel_url"] and em["channel_url"]:
+                    owner["channel_url"] = em["channel_url"]
+                if owner["channel_id"] and owner["channel_name"]:
+                    break
+
+    handle = (
+        _channel_handle_from_url(owner["channel_url"])
+        or _channel_handle_from_url(url)
+        or None
+    )
+
+    avatar_url = _pick_avatar_from_thumbnails(info.get("thumbnails"))
+
+    total_video_count: int | None = None
+    pcount = info.get("playlist_count") if isinstance(info, dict) else None
+    if isinstance(pcount, int) and pcount > 0:
+        total_video_count = pcount
+    if total_video_count is None:
+        try:
+            total_video_count = fetch_playlist_count(playlist_id) or None
+        except Exception:
+            total_video_count = None
+
+    return {
+        "kind": "playlist",
+        "channel_id": playlist_id,
+        "channel_name": playlist_title,
+        "channel_handle": handle,
+        "channel_url": canonical_url,
+        "avatar_url": avatar_url,
+        "subscriber_count": None,
+        "total_video_count": total_video_count,
+        "playlist_id": playlist_id,
+        "playlist_title": playlist_title,
+        "owner_channel_id": owner["channel_id"] or None,
+        "owner_channel_name": owner["channel_name"] or None,
     }
 
 
@@ -340,6 +530,31 @@ def fetch_channel_shorts_page(
         ]
     )
     return _parse_video_entries_with_total(stdout, is_short=True)
+
+
+def fetch_playlist_videos_page(
+    playlist_id: str,
+    *,
+    start: int = 1,
+    end: int | None = None,
+) -> tuple[list[dict[str, Any]], int | None]:
+    """Return a paginated slice of videos from a single playlist.
+
+    Mirrors :func:`fetch_channel_videos_page` but targets the
+    ``playlist?list=<id>`` URL so the entries come from one playlist rather
+    than a channel tab.
+    """
+    url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    stdout = _run_ytdlp(
+        [
+            "--flat-playlist",
+            "--dump-json",
+            "--playlist-items",
+            _playlist_items_arg(start, end),
+            url,
+        ]
+    )
+    return _parse_video_entries_with_total(stdout, is_short=False)
 
 
 def fetch_tab_count(tab_url: str) -> int:

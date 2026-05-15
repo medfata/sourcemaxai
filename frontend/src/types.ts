@@ -10,11 +10,20 @@ export interface WaitlistJoinResult {
   transcript_minutes: number
 }
 
+export type ChannelKind = 'channel' | 'playlist'
+
 export interface ChannelMeta {
+  kind: ChannelKind
   channel_id: string
   channel_name: string
   channel_handle: string | null
   avatar_url: string | null
+  subscriber_count: number | null
+  total_video_count: number | null
+  playlist_id: string | null
+  playlist_title: string | null
+  owner_channel_id: string | null
+  owner_channel_name: string | null
 }
 
 export interface Video {
@@ -67,10 +76,17 @@ export interface ChannelCounts {
 }
 
 export interface ChannelSummary {
+  kind: ChannelKind
   channel_id: string
   channel_name: string
   channel_handle: string | null
   avatar_url: string | null
+  subscriber_count: number | null
+  total_video_count: number | null
+  playlist_id: string | null
+  playlist_title: string | null
+  owner_channel_id: string | null
+  owner_channel_name: string | null
   video_count: number
   has_profile: boolean
   latest_run_status: string | null

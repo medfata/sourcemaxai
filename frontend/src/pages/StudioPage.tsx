@@ -18,6 +18,8 @@ import type {
 } from '../types'
 import { STAGES } from '../types'
 import { formatMonthYear, formatRelativeDate, formatShortDate, formatTimestamp } from '../utils/date'
+import { formatCompactNumber } from '../utils/number'
+import { useConfirm } from '../components/ConfirmDialog'
 import ChatPage from './ChatPage'
 import './StudioPage.css'
 
@@ -197,6 +199,8 @@ function metaFromSummary(channel: ChannelSummary): ChannelMeta {
     channel_name: channel.channel_name,
     channel_handle: channel.channel_handle,
     avatar_url: channel.avatar_url,
+    subscriber_count: channel.subscriber_count,
+    total_video_count: channel.total_video_count,
   }
 }
 
@@ -206,6 +210,8 @@ function summaryFromMeta(meta: ChannelMeta): ChannelSummary {
     channel_name: meta.channel_name,
     channel_handle: meta.channel_handle,
     avatar_url: meta.avatar_url,
+    subscriber_count: meta.subscriber_count,
+    total_video_count: meta.total_video_count,
     video_count: 0,
     has_profile: false,
     latest_run_status: null,
@@ -271,10 +277,10 @@ function inferView(channel: ChannelSummary | null, pipeline: PipelineState | nul
     if (currentStage === 'transcripts' || currentStage === 'chunks') return 'transcripts'
     if (currentStage === 'summaries' || currentStage === 'profile') return 'summaries'
   }
-  if (pipelineStatus === 'awaiting_confirm_summaries') return 'summaries'
+  if (pipelineStatus === 'awaiting_confirm_summaries') return 'transcripts'
   if (pipelineStatus === 'completed' || profileStatus === 'done' || channel.has_profile) return 'profile_ready'
   if (summaryStatus === 'done') return 'summaries'
-  if (transcriptStatus === 'done') return 'summaries'
+  if (transcriptStatus === 'done') return 'transcripts'
   return 'videos'
 }
 
@@ -404,6 +410,7 @@ export default function StudioPage({
   const [chatSeed, setChatSeed] = useState<string | undefined>()
   const [notice, setNotice] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const [refreshing, setRefreshing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -682,13 +689,18 @@ export default function StudioPage({
 
   const handleDeleteChannel = async () => {
     if (!selectedChannel) return
-    if (!window.confirm(`Delete ${selectedChannel.channel_name}?`)) return
     setActionError(null)
-    const res = await api.deleteChannel(selectedChannel.channel_id)
-    if (!res.ok) {
-      setActionError(res.error || 'Delete failed')
-      return
-    }
+    const ok = await confirm({
+      title: 'Delete channel',
+      message: `Delete ${selectedChannel.channel_name}? This removes it from your library.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+      action: async () => {
+        const res = await api.deleteChannel(selectedChannel.channel_id)
+        if (!res.ok) throw new Error(res.error || 'Delete failed')
+      },
+    })
+    if (!ok) return
     setGroups((prev) => {
       const cleaned = prev
         .map((group) => ({
@@ -788,12 +800,17 @@ export default function StudioPage({
 
   const handleDeleteChatSession = async (session: ChatSessionSummary) => {
     if (!selectedChannel) return
-    if (!window.confirm(`Delete "${session.title}"?`)) return
-    const res = await api.deleteChatSession(selectedChannel.channel_id, session.id)
-    if (!res.ok) {
-      setActionError(res.error || 'Could not delete chat')
-      return
-    }
+    const ok = await confirm({
+      title: 'Delete chat',
+      message: `Delete "${session.title}"? This conversation will be removed.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+      action: async () => {
+        const res = await api.deleteChatSession(selectedChannel.channel_id, session.id)
+        if (!res.ok) throw new Error(res.error || 'Could not delete chat')
+      },
+    })
+    if (!ok) return
     setChatSessions((prev) => {
       const next = prev.filter((chat) => chat.id !== session.id)
       if (activeChatSessionId === session.id) {
@@ -965,6 +982,7 @@ export default function StudioPage({
           )}
         </section>
       </main>
+      {confirmDialog}
     </div>
   )
 }
@@ -1645,6 +1663,7 @@ function VideoSelectionPanel({
   onSelectionChange?: (total: number) => void
 }) {
   const PAGE_SIZE = 50
+  const isPlaylistMode = (channel.kind ?? 'channel') === 'playlist'
   const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
   const [counts, setCounts] = useState<{ videos: number; shorts: number; playlists: number } | null>(null)
   const [longVideos, setLongVideos] = useState<Video[]>([])
@@ -1670,22 +1689,31 @@ function VideoSelectionPanel({
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [longRes, selectionRes, countsRes] = await Promise.all([
+      const [longRes, selectionRes] = await Promise.all([
         api.videoPage(channel.channel_id, 'videos', 0, PAGE_SIZE),
         api.selection(channel.channel_id),
-        api.channelCounts(channel.channel_id),
       ])
       if (cancelled) return
       const longList = longRes.data?.videos ?? []
       setLongVideos(longList)
       setLongHasMore(longRes.data?.has_more ?? false)
       setLongTotal(longRes.data?.total ?? longList.length)
-      if (countsRes.data) setCounts({ videos: countsRes.data.videos, shorts: countsRes.data.shorts, playlists: countsRes.data.playlists })
       const persistedIds = selectionRes.data?.video_ids ?? []
       setSelectedIds(new Set(persistedIds))
       setLoading(false)
     }
     void load()
+    return () => {
+      cancelled = true
+    }
+  }, [channel.channel_id])
+
+  useEffect(() => {
+    let cancelled = false
+    void api.channelCounts(channel.channel_id).then((res) => {
+      if (cancelled) return
+      if (res.data) setCounts({ videos: res.data.videos, shorts: res.data.shorts, playlists: res.data.playlists })
+    })
     return () => {
       cancelled = true
     }
@@ -1723,6 +1751,7 @@ function VideoSelectionPanel({
   }, [selectedIds, selectedPlaylistIds, playlists, onSelectionChange])
 
   useEffect(() => {
+    if (isPlaylistMode) return
     if (tab === 'playlists' && !playlistsAttemptedRef.current) {
       playlistsAttemptedRef.current = true
       setPlaylistsLoading(true)
@@ -1745,7 +1774,7 @@ function VideoSelectionPanel({
         setShortTotal(res.data.total)
       })
     }
-  }, [tab, channel.channel_id])
+  }, [tab, channel.channel_id, isPlaylistMode])
 
   const loadMore = async () => {
     setLoadingMore(true)
@@ -1826,10 +1855,13 @@ function VideoSelectionPanel({
   }
 
   const handle = channel.channel_handle ? (channel.channel_handle.startsWith('@') ? channel.channel_handle : `@${channel.channel_handle}`) : null
-  const youtubeUrl = handle
-    ? `https://www.youtube.com/${handle}`
-    : `https://www.youtube.com/channel/${channel.channel_id}`
+  const youtubeUrl = isPlaylistMode
+    ? `https://www.youtube.com/playlist?list=${channel.playlist_id ?? channel.channel_id}`
+    : handle
+      ? `https://www.youtube.com/${handle}`
+      : `https://www.youtube.com/channel/${channel.channel_id}`
   const lastUpload = longVideos[0]?.upload_date
+  const subscriberLabel = formatCompactNumber(channel.subscriber_count ?? undefined)
   const estMin = Math.max(1, Math.ceil(optimisticTotal * 0.1))
   const tabs = [
     { id: 'videos' as const, label: 'Videos' },
@@ -1850,8 +1882,17 @@ function VideoSelectionPanel({
             )}
             <div className="studio-vids-channel-body">
               <div className="studio-vids-channel-row">
+                {isPlaylistMode && (
+                  <span className="studio-vids-channel-stat" style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>Playlist</span>
+                )}
                 <span className="studio-vids-channel-name">{channel.channel_name}</span>
                 {handle && <span className="studio-vids-channel-handle">{handle}</span>}
+                {!isPlaylistMode && subscriberLabel && (
+                  <span className="studio-vids-channel-stat">· {subscriberLabel} subscribers</span>
+                )}
+                {isPlaylistMode && channel.owner_channel_name && (
+                  <span className="studio-vids-channel-stat">· by {channel.owner_channel_name}</span>
+                )}
               </div>
               {lastUpload && (
                 <div className="studio-vids-channel-meta">
@@ -1865,7 +1906,7 @@ function VideoSelectionPanel({
           </div>
 
           <div className="studio-vids-tabs" role="tablist">
-            {tabs.map((item) => (
+            {!isPlaylistMode && tabs.map((item) => (
               <button
                 key={item.id}
                 role="tab"
@@ -1876,6 +1917,11 @@ function VideoSelectionPanel({
                 <span className="studio-vids-tab-label">{item.label}</span>
               </button>
             ))}
+            {isPlaylistMode && (
+              <span className="studio-vids-tab is-active" aria-current="true">
+                <span className="studio-vids-tab-label">Playlist videos</span>
+              </span>
+            )}
             <div className="studio-vids-tabs-spacer" />
             {tab !== 'playlists' && subset.length > 0 && (
               <div className="studio-vids-quick">
@@ -2125,22 +2171,19 @@ function ProgressPanel({
   const [controlError, setControlError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [resuming, setResuming] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
   const [starting, setStarting] = useState(false)
+  const { confirm, dialog: confirmDialog } = useConfirm()
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [videosRes, selectionRes, costRes] = await Promise.all([
+      const [videosRes, costRes] = await Promise.all([
         api.videos(channel.channel_id),
-        api.selection(channel.channel_id),
         stage === 'summaries' ? api.pipelineCost(channel.channel_id) : Promise.resolve(null),
       ])
       if (cancelled) return
-      const allVideos = videosRes.data?.videos ?? []
-      const selected = new Set(selectionRes.data?.video_ids ?? allVideos.map((video) => video.id))
-      setBaseVideos(allVideos.filter((video) => selected.has(video.id)))
+      setBaseVideos(videosRes.data?.videos ?? [])
       if (costRes && costRes.ok && costRes.data) setCost(costRes.data)
       setLoading(false)
     }
@@ -2186,23 +2229,31 @@ function ProgressPanel({
   }
 
   const rows: Row[] = useMemo(() => {
-    const base = baseVideos.length > 0
-      ? baseVideos.map((video, i) => ({
-          id: video.id,
-          idx: i + 1,
-          title: video.title,
-          thumbnail: video.thumbnail,
-          duration: video.duration,
-          status: typeof statusMap[video.id]?.status === 'string' ? (statusMap[video.id].status as string) : 'queued',
-        }))
-      : Object.entries(statusMap).map(([id, vstate], i) => ({
+    const statusIds = new Set(Object.keys(statusMap))
+    const fromBase = baseVideos
+      .filter((video) => statusIds.has(video.id))
+      .map((video) => ({
+        id: video.id,
+        title: video.title,
+        thumbnail: video.thumbnail,
+        duration: video.duration,
+        status: typeof statusMap[video.id]?.status === 'string' ? (statusMap[video.id].status as string) : 'queued',
+      }))
+    const seen = new Set(fromBase.map((r) => r.id))
+    const fromStatus = Object.entries(statusMap)
+      .filter(([id]) => !seen.has(id))
+      .map(([id, vstate]) => {
+        const meta = videoMetaMap.get(id)
+        const stateTitle = typeof vstate.title === 'string' && vstate.title.trim() ? vstate.title : ''
+        return {
           id,
-          idx: i + 1,
-          title: typeof vstate.title === 'string' ? vstate.title : 'Untitled',
-          thumbnail: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
-          duration: 0,
+          title: meta?.title || stateTitle || 'Untitled',
+          thumbnail: meta?.thumbnail || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+          duration: meta?.duration ?? 0,
           status: typeof vstate.status === 'string' ? vstate.status : 'queued',
-        }))
+        }
+      })
+    const base = [...fromBase, ...fromStatus].map((r, i) => ({ ...r, idx: i + 1 }))
     let fetchIdx = 0
     return base.map((r) => {
       let subLabel = 'Queued'
@@ -2222,7 +2273,7 @@ function ProgressPanel({
       }
       return { ...r, subLabel, subPct }
     })
-  }, [baseVideos, statusMap, stage])
+  }, [baseVideos, statusMap, stage, videoMetaMap])
 
   const videoStats = useMemo(() => {
     let done = 0
@@ -2259,6 +2310,10 @@ function ProgressPanel({
     () => Object.values(statusMap).some((v) => v.status === 'done' || v.status === 'skipped'),
     [statusMap],
   )
+  const hasCompletedTranscript = useMemo(
+    () => Object.values(statusMap).some((v) => v.status === 'done'),
+    [statusMap],
+  )
   const transcriptsRunning =
     (pipelineStatus === 'running' || pipelineStatus === 'queued') &&
     (currentStage === 'transcripts' || currentStage === 'chunks')
@@ -2280,8 +2335,8 @@ function ProgressPanel({
     pipelineStatus !== 'awaiting_confirm_summaries' &&
     (transcriptsNeverStarted || (transcriptsHalted && !hasSummarizableTranscript))
   const canSummarize =
-    pipelineStatus === 'awaiting_confirm_summaries' ||
-    (hasSummarizableTranscript && transcriptsHalted)
+    hasCompletedTranscript &&
+    (pipelineStatus === 'awaiting_confirm_summaries' || transcriptsHalted)
   const showSummarizeFromTranscripts =
     stage === 'transcripts' && !showStartGate && !transcriptsRunning && canSummarize
   const showResumeTranscriptsBtn =
@@ -2290,7 +2345,7 @@ function ProgressPanel({
     stage === 'summaries' &&
     !summariesRunning &&
     !summariesAlreadyStarted &&
-    hasSummarizableTranscript &&
+    hasCompletedTranscript &&
     (pipelineStatus === 'awaiting_confirm_summaries' ||
       pipelineStatus === 'cancelled' ||
       pipelineStatus === 'failed')
@@ -2300,10 +2355,17 @@ function ProgressPanel({
   const etaMin = stage === 'transcripts' ? 4 : 6
 
   const handleCancel = async () => {
-    if (!window.confirm('Cancel the pipeline run?')) return
-    setCancelling(true)
-    await api.pipelineCancel(channel.channel_id)
-    setCancelling(false)
+    await confirm({
+      title: 'Cancel pipeline run',
+      message: 'Stop the current run? Completed work will be kept.',
+      confirmLabel: 'Cancel run',
+      cancelLabel: 'Keep running',
+      variant: 'danger',
+      action: async () => {
+        const res = await api.pipelineCancel(channel.channel_id)
+        if (!res.ok) throw new Error(res.error || 'Could not cancel run')
+      },
+    })
   }
 
   const handleStart = async () => {
@@ -2390,15 +2452,41 @@ function ProgressPanel({
               </p>
             </div>
             {transcriptsRunning && stage === 'transcripts' && (
-              <button type="button" className="studio-progress-cancel" onClick={handleCancel} disabled={cancelling}>
-                {cancelling ? 'Cancelling…' : 'Cancel run'}
+              <button type="button" className="studio-progress-cancel" onClick={handleCancel}>
+                Cancel run
               </button>
             )}
             {summariesRunning && stage === 'summaries' && !showCostGate && (
-              <button type="button" className="studio-progress-cancel" onClick={handleCancel} disabled={cancelling}>
-                {cancelling ? 'Cancelling…' : 'Cancel run'}
+              <button type="button" className="studio-progress-cancel" onClick={handleCancel}>
+                Cancel run
               </button>
             )}
+            {(() => {
+              const showRetryFailed =
+                stage === 'transcripts' && !transcriptsRunning && !showStartGate && failed > 0 && !!runId
+              if (!showRetryFailed && (showStartGate || showCostGate || (!showSummarizeFromTranscripts && !showResumeTranscriptsBtn))) return null
+              return (
+                <div className="studio-progress-head-actions">
+                  {showRetryFailed && (
+                    <button type="button" className="btn-secondary-sm" onClick={handleRetryFailed} disabled={retrying}>
+                      {retrying ? <span className="studio-spinner" /> : <Icons.Refresh />}
+                      Retry {failed} failed
+                    </button>
+                  )}
+                  {showResumeTranscriptsBtn && (
+                    <button type="button" className="btn-secondary-sm" onClick={handleStart} disabled={starting}>
+                      {starting ? <span className="studio-spinner" /> : null}
+                      Resume transcription
+                    </button>
+                  )}
+                  {showSummarizeFromTranscripts && (
+                    <button type="button" className="studio-cost-cta studio-summarize-glow" onClick={onSwitchToSummaries}>
+                      {partialTranscripts ? 'Summarize what we have ' : 'Summarize '}<Icons.Arrow />
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           {controlError && <div className="studio-form-error">{controlError}</div>}
@@ -2561,22 +2649,6 @@ function ProgressPanel({
                 </div>
               </div>
 
-              {(showSummarizeFromTranscripts || showResumeTranscriptsBtn) && (
-                <div className="studio-cost-actions">
-                  {showResumeTranscriptsBtn && (
-                    <button type="button" className="btn-secondary-sm" onClick={handleStart} disabled={starting}>
-                      {starting ? <span className="studio-spinner" /> : null}
-                      Resume transcription
-                    </button>
-                  )}
-                  {showSummarizeFromTranscripts && (
-                    <button type="button" className="studio-cost-cta" onClick={onSwitchToSummaries}>
-                      {partialTranscripts ? 'Summarize what we have ' : 'Summarize '}<Icons.Arrow />
-                    </button>
-                  )}
-                </div>
-              )}
-
               <div className="studio-progress-foot">
                 {cost && (
                   <>
@@ -2600,6 +2672,7 @@ function ProgressPanel({
           )}
         </div>
       </div>
+      {confirmDialog}
     </div>
   )
 }

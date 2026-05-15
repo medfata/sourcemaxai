@@ -1,5 +1,9 @@
 """Video listing and selection routes."""
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import APIRouter, Depends, Query
 
 from backend.auth import CurrentUser, get_current_user
@@ -20,7 +24,8 @@ from backend.pipeline.fetch_videos import (
     fetch_channel_playlists,
     fetch_channel_shorts_page,
     fetch_channel_videos_page,
-    fetch_playlist_video_ids,
+    fetch_playlist_count,
+    fetch_playlist_videos_page,
     fetch_tab_count,
 )
 from backend.storage import (
@@ -118,13 +123,32 @@ def get_videos_page(
     if not meta:
         return ApiResponse(ok=False, error="Channel not found")
 
+    is_playlist_meta = (meta.get("kind") or "channel") == "playlist"
+    if is_playlist_meta and kind == "shorts":
+        # Playlists do not split into a Shorts tab.
+        return ApiResponse(
+            ok=True,
+            data=VideoPage(
+                channel_id=channel_id,
+                kind=kind,
+                offset=offset,
+                limit=limit,
+                total=0,
+                videos=[],
+                has_more=False,
+            ),
+        )
+
     channel_url = _channel_url_from_meta(channel_id, meta)
     cached = _sort_newest_first(
         _normalize_cached(load_videos(channel_id, owner_id=owner_id) or [])
     )
 
     want_short = kind == "shorts"
-    filtered = [v for v in cached if bool(v.get("is_short")) is want_short]
+    if is_playlist_meta:
+        filtered = list(cached)
+    else:
+        filtered = [v for v in cached if bool(v.get("is_short")) is want_short]
 
     # Cursor-pagination probe: fetch one extra entry so we can tell whether
     # more items exist without trusting yt-dlp's unreliable ``playlist_count``.
@@ -134,7 +158,12 @@ def get_videos_page(
         fetch_start = len(filtered) + 1
         fetch_end = needed
         try:
-            if want_short:
+            if is_playlist_meta:
+                playlist_id = str(meta.get("playlist_id") or channel_id)
+                new_videos, fetched_total = fetch_playlist_videos_page(
+                    playlist_id, start=fetch_start, end=fetch_end
+                )
+            elif want_short:
                 new_videos, fetched_total = fetch_channel_shorts_page(
                     channel_url, start=fetch_start, end=fetch_end
                 )
@@ -148,7 +177,10 @@ def get_videos_page(
         merged = _merge_videos(cached, new_videos)
         save_videos(channel_id, merged, owner_id=owner_id)
         cached = merged
-        filtered = [v for v in cached if bool(v.get("is_short")) is want_short]
+        if is_playlist_meta:
+            filtered = list(cached)
+        else:
+            filtered = [v for v in cached if bool(v.get("is_short")) is want_short]
 
     page = filtered[offset : offset + limit]
     has_more = len(filtered) > offset + limit
@@ -167,6 +199,42 @@ def get_videos_page(
     )
 
 
+_COUNTS_CACHE_TTL_SECONDS = 600
+_counts_cache: dict[tuple[str, str], tuple[float, tuple[int, int, int]]] = {}
+_counts_cache_lock = threading.Lock()
+_counts_in_flight: dict[tuple[str, str], threading.Lock] = {}
+
+
+def _counts_cache_get(owner_id: str, channel_id: str) -> tuple[int, int, int] | None:
+    key = (owner_id, channel_id)
+    with _counts_cache_lock:
+        entry = _counts_cache.get(key)
+        if not entry:
+            return None
+        expires_at, value = entry
+        if expires_at < time.time():
+            _counts_cache.pop(key, None)
+            return None
+        return value
+
+
+def _counts_cache_set(owner_id: str, channel_id: str, value: tuple[int, int, int]) -> None:
+    key = (owner_id, channel_id)
+    with _counts_cache_lock:
+        _counts_cache[key] = (time.time() + _COUNTS_CACHE_TTL_SECONDS, value)
+
+
+def _counts_in_flight_lock(owner_id: str, channel_id: str) -> threading.Lock:
+    """Per-channel lock so concurrent callers share one yt-dlp computation."""
+    key = (owner_id, channel_id)
+    with _counts_cache_lock:
+        lock = _counts_in_flight.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _counts_in_flight[key] = lock
+        return lock
+
+
 @router.get("/api/videos/counts")
 def get_video_counts(
     channel_id: str = Query(...),
@@ -178,13 +246,52 @@ def get_video_counts(
     if not meta:
         return ApiResponse(ok=False, error="Channel not found")
 
+    if (meta.get("kind") or "channel") == "playlist":
+        playlist_id = str(meta.get("playlist_id") or channel_id)
+        try:
+            videos = fetch_playlist_count(playlist_id)
+        except Exception as exc:
+            return ApiResponse(ok=False, error=str(exc))
+        return ApiResponse(
+            ok=True,
+            data=ChannelCounts(
+                channel_id=channel_id,
+                videos=videos,
+                shorts=0,
+                playlists=0,
+            ),
+        )
+
+    cached = _counts_cache_get(owner_id, channel_id)
+    if cached is not None:
+        videos, shorts, playlists = cached
+        return ApiResponse(
+            ok=True,
+            data=ChannelCounts(
+                channel_id=channel_id,
+                videos=videos,
+                shorts=shorts,
+                playlists=playlists,
+            ),
+        )
+
     channel_url = _channel_url_from_meta(channel_id, meta)
-    try:
-        videos = fetch_tab_count(channel_videos_url(channel_url))
-        shorts = fetch_tab_count(channel_shorts_url(channel_url))
-        playlists = fetch_tab_count(channel_playlists_url(channel_url))
-    except Exception as exc:
-        return ApiResponse(ok=False, error=str(exc))
+    with _counts_in_flight_lock(owner_id, channel_id):
+        cached = _counts_cache_get(owner_id, channel_id)
+        if cached is not None:
+            videos, shorts, playlists = cached
+        else:
+            try:
+                with ThreadPoolExecutor(max_workers=3) as pool:
+                    videos_fut = pool.submit(fetch_tab_count, channel_videos_url(channel_url))
+                    shorts_fut = pool.submit(fetch_tab_count, channel_shorts_url(channel_url))
+                    playlists_fut = pool.submit(fetch_tab_count, channel_playlists_url(channel_url))
+                    videos = videos_fut.result()
+                    shorts = shorts_fut.result()
+                    playlists = playlists_fut.result()
+            except Exception as exc:
+                return ApiResponse(ok=False, error=str(exc))
+            _counts_cache_set(owner_id, channel_id, (videos, shorts, playlists))
 
     return ApiResponse(
         ok=True,
@@ -248,6 +355,12 @@ def get_playlists(
     if not meta:
         return ApiResponse(ok=False, error="Channel not found")
 
+    if (meta.get("kind") or "channel") == "playlist":
+        # A playlist-scoped entity has no nested playlists.
+        return ApiResponse(
+            ok=True, data=PlaylistList(channel_id=channel_id, playlists=[])
+        )
+
     cached = load_playlists(channel_id, owner_id=owner_id)
     if cached:
         return ApiResponse(
@@ -276,16 +389,21 @@ def get_playlist_videos(
     if not meta:
         return ApiResponse(ok=False, error="Channel not found")
 
-    cached = load_playlist_video_ids(channel_id, playlist_id, owner_id=owner_id)
-    if cached is not None:
+    cached_ids = load_playlist_video_ids(channel_id, playlist_id, owner_id=owner_id)
+    cached_videos = load_videos(channel_id, owner_id=owner_id) or []
+    have_titles = {str(v.get("id")) for v in cached_videos if v.get("title")}
+    if cached_ids is not None and all(vid in have_titles for vid in cached_ids):
         return ApiResponse(
             ok=True,
-            data=PlaylistVideos(playlist_id=playlist_id, video_ids=cached),
+            data=PlaylistVideos(playlist_id=playlist_id, video_ids=cached_ids),
         )
 
     try:
-        video_ids = fetch_playlist_video_ids(playlist_id)
+        videos, _ = fetch_playlist_videos_page(playlist_id)
+        video_ids = [str(v.get("id")) for v in videos if v.get("id")]
         save_playlist_video_ids(channel_id, playlist_id, video_ids, owner_id=owner_id)
+        merged = _merge_videos(cached_videos, videos)
+        save_videos(channel_id, merged, owner_id=owner_id)
         return ApiResponse(
             ok=True,
             data=PlaylistVideos(playlist_id=playlist_id, video_ids=video_ids),

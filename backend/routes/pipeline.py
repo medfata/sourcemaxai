@@ -197,8 +197,43 @@ def _write_pipeline_state(
     get_pipeline_run_store().write_state(_state_owner_id(owner_id), channel_id, state)
 
 
+def _hydrate_video_titles(channel_id: str, state: dict) -> dict:
+    stages = state.get("stages")
+    if not isinstance(stages, dict):
+        return state
+    title_by_id = {
+        str(v.get("id")): v.get("title")
+        for v in (load_videos(channel_id) or [])
+        if v.get("id") and v.get("title")
+    }
+    if not title_by_id:
+        return state
+    new_stages: dict[str, Any] = {}
+    for stage_id, stage in stages.items():
+        if not isinstance(stage, dict):
+            new_stages[stage_id] = stage
+            continue
+        videos = stage.get("videos")
+        if not isinstance(videos, dict):
+            new_stages[stage_id] = stage
+            continue
+        new_videos: dict[str, Any] = {}
+        for vid, vstate in videos.items():
+            if not isinstance(vstate, dict):
+                new_videos[vid] = vstate
+                continue
+            fresh_title = title_by_id.get(str(vid))
+            current_title = vstate.get("title")
+            if fresh_title and (not current_title or current_title == "Untitled"):
+                new_videos[vid] = {**vstate, "title": fresh_title}
+            else:
+                new_videos[vid] = vstate
+        new_stages[stage_id] = {**stage, "videos": new_videos}
+    return {**state, "stages": new_stages}
+
+
 def _with_generated_file_report(channel_id: str, state: dict) -> dict:
-    enriched = dict(state)
+    enriched = _hydrate_video_titles(channel_id, dict(state))
     report_channel_id = str(enriched.get("channel_id") or channel_id)
     enriched["generated_files"] = get_generated_file_report(report_channel_id)
     return enriched

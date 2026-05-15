@@ -11,10 +11,19 @@ interface ChannelInputPageProps {
 }
 
 const EXAMPLES = [
-  { label: '@mkbhd', url: 'https://www.youtube.com/@mkbhd' },
-  { label: '@veritasium', url: 'https://www.youtube.com/@veritasium' },
-  { label: '@lexfridman', url: 'https://www.youtube.com/@lexfridman' },
+  { label: '@mkbhd', url: '@mkbhd' },
+  { label: '@veritasium', url: '@veritasium' },
+  { label: '@lexfridman', url: '@lexfridman' },
 ]
+
+const HANDLE_RE = /^@[A-Za-z0-9._-]+$/
+
+function normalizeChannelInput(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (HANDLE_RE.test(trimmed)) return `https://www.youtube.com/${trimmed}`
+  return trimmed
+}
 
 const STEPS = [
   { n: '01', title: 'Pick a channel', body: 'Paste any YouTube URL or handle. We pull the catalogue automatically.' },
@@ -41,12 +50,13 @@ export default function ChannelInputPage({
 
   const resolveChannel = useCallback(async (nextUrl: string) => {
     setError('')
-    if (!nextUrl.trim()) {
-      setError('Enter a URL to continue')
+    const normalized = normalizeChannelInput(nextUrl)
+    if (!normalized) {
+      setError('Enter a URL, @handle, or playlist link to continue')
       return
     }
     setLoading(true)
-    const res = await api.channel(nextUrl.trim())
+    const res = await api.channel(normalized)
     setLoading(false)
     if (res.ok && res.data) {
       onInitialUrlConsumed?.()
@@ -133,7 +143,7 @@ export default function ChannelInputPage({
                   setUrl(e.target.value)
                   if (error) setError('')
                 }}
-                placeholder="paste youtube.com/@channel"
+                placeholder="@handle, youtube.com/@channel, or playlist link"
                 className="flex-1 h-12 px-4 bg-transparent text-[16px] text-ink-900 dark:text-cream placeholder:text-ink-300 dark:placeholder:text-white/30 outline-none"
               />
               <button

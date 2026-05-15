@@ -12,7 +12,11 @@ from backend.models import (
     ChannelSummary,
     ChannelUrlPayload,
 )
-from backend.pipeline.fetch_videos import fetch_channel_videos, resolve_channel
+from backend.pipeline.fetch_videos import (
+    fetch_channel_videos,
+    fetch_playlist_videos_page,
+    resolve_channel,
+)
 from backend.storage import (
     delete_channel,
     list_channels,
@@ -97,7 +101,11 @@ def refresh_channel_route(
         return ApiResponse(ok=False, error="Channel not found")
 
     try:
-        fetched = fetch_channel_videos(_channel_url_from_meta(channel_id, meta))
+        if (meta.get("kind") or "channel") == "playlist":
+            playlist_id = str(meta.get("playlist_id") or channel_id)
+            fetched, _ = fetch_playlist_videos_page(playlist_id)
+        else:
+            fetched = fetch_channel_videos(_channel_url_from_meta(channel_id, meta))
     except Exception as exc:
         return ApiResponse(ok=False, error=str(exc))
 

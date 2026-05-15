@@ -5,11 +5,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.pipeline.fetch_videos import (
+    _extract_playlist_id,
+    _normalize_input,
     _run_ytdlp,
     fetch_channel_shorts,
     fetch_channel_videos,
+    fetch_playlist_videos_page,
     fetch_tab_count,
     resolve_channel,
+    resolve_playlist,
 )
 
 
@@ -198,19 +202,29 @@ def test_resolve_channel_uses_flat_playlist_for_metadata():
 
     def fake_run_ytdlp(args):
         calls.append(args)
+        if any("playlist:%(playlist_count)s" in a for a in args):
+            return "1300\n"
         if "--print" in args:
             return "UC123\nCreator Name\nhttps://www.youtube.com/@creator\n"
-        return json.dumps({"thumbnails": [{"url": "https://example.test/avatar.jpg"}]})
+        return json.dumps({
+            "thumbnails": [{"url": "https://example.test/avatar.jpg"}],
+            "channel_follower_count": 5_620_000,
+        })
 
     with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
         meta = resolve_channel("https://www.youtube.com/@creator")
 
     assert meta == {
+        "kind": "channel",
         "channel_id": "UC123",
         "channel_name": "Creator Name",
         "channel_handle": "creator",
         "channel_url": "https://www.youtube.com/@creator",
         "avatar_url": "https://example.test/avatar.jpg",
+        "subscriber_count": 5_620_000,
+        "total_video_count": 1300,
+        "playlist_id": None,
+        "playlist_title": None,
     }
     assert calls[0] == [
         "--flat-playlist",
@@ -259,3 +273,133 @@ def test_resolve_channel_falls_back_when_ytdlp_prints_na():
         "1",
         "https://www.youtube.com/@david.fragomeni",
     ]
+
+
+def test_normalize_input_rewrites_bare_handle():
+    assert _normalize_input("@melrobbins") == "https://www.youtube.com/@melrobbins"
+    assert _normalize_input("  @lex.fridman  ") == "https://www.youtube.com/@lex.fridman"
+
+
+def test_normalize_input_preserves_urls_and_blanks():
+    assert _normalize_input("https://www.youtube.com/@x") == "https://www.youtube.com/@x"
+    assert _normalize_input("") == ""
+    # Bare text without leading @ stays untouched (yt-dlp will fail clearly).
+    assert _normalize_input("melrobbins") == "melrobbins"
+
+
+def test_extract_playlist_id_canonical_url():
+    pid = _extract_playlist_id("https://www.youtube.com/playlist?list=PLabc123")
+    assert pid == "PLabc123"
+
+
+def test_extract_playlist_id_in_watch_url():
+    pid = _extract_playlist_id(
+        "https://www.youtube.com/watch?v=xxx&list=PLabc123&index=2"
+    )
+    assert pid == "PLabc123"
+
+
+def test_extract_playlist_id_rejects_radio_mix():
+    assert _extract_playlist_id("https://www.youtube.com/watch?v=x&list=RD123") is None
+
+
+def test_extract_playlist_id_rejects_uploads_playlist():
+    # UU... uploads playlists should fall through to channel resolution.
+    assert _extract_playlist_id("https://www.youtube.com/playlist?list=UU123") is None
+
+
+def test_extract_playlist_id_non_youtube_host():
+    assert _extract_playlist_id("https://example.com/playlist?list=PLabc") is None
+
+
+def test_resolve_channel_dispatches_playlist_url():
+    """A ``?list=PL...`` URL routes through resolve_playlist (kind=playlist)."""
+    info = json.dumps(
+        {
+            "id": "PLxyz",
+            "title": "Best Of Mel",
+            "channel_id": "UCmel",
+            "channel": "Mel Robbins",
+            "channel_url": "https://www.youtube.com/@melrobbins",
+            "thumbnails": [{"url": "https://example.test/playlist.jpg"}],
+            "playlist_count": 42,
+        }
+    )
+
+    def fake_run_ytdlp(args):
+        if "--dump-single-json" in args:
+            return info
+        # fetch_playlist_count fallback should not run when playlist_count present.
+        return ""
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        meta = resolve_channel("https://www.youtube.com/playlist?list=PLxyz")
+
+    assert meta["kind"] == "playlist"
+    assert meta["channel_id"] == "PLxyz"
+    assert meta["playlist_id"] == "PLxyz"
+    assert meta["playlist_title"] == "Best Of Mel"
+    assert meta["channel_name"] == "Best Of Mel"
+    assert meta["channel_url"] == "https://www.youtube.com/playlist?list=PLxyz"
+    assert meta["channel_handle"] == "melrobbins"
+    assert meta["owner_channel_id"] == "UCmel"
+    assert meta["owner_channel_name"] == "Mel Robbins"
+    assert meta["total_video_count"] == 42
+
+
+def test_resolve_playlist_extracts_owner_from_first_entry():
+    """Owner channel info can come from entries[0] when envelope lacks it."""
+    info = json.dumps(
+        {
+            "id": "PLowner",
+            "title": "Saved Picks",
+            "thumbnails": [],
+            "entries": [
+                {
+                    "id": "vid1",
+                    "channel_id": "UCowner",
+                    "channel": "Owner Name",
+                    "channel_url": "https://www.youtube.com/@ownerhandle",
+                }
+            ],
+        }
+    )
+
+    def fake_run_ytdlp(args):
+        if "--dump-single-json" in args:
+            return info
+        if any("playlist:%(playlist_count)s" in a for a in args):
+            return "5\n"
+        return ""
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        meta = resolve_playlist("https://www.youtube.com/playlist?list=PLowner")
+
+    assert meta["owner_channel_id"] == "UCowner"
+    assert meta["owner_channel_name"] == "Owner Name"
+    assert meta["channel_handle"] == "ownerhandle"
+    assert meta["total_video_count"] == 5
+
+
+def test_fetch_playlist_videos_page_uses_playlist_url():
+    calls: list[list[str]] = []
+    mock = _mock_stdout([
+        {
+            "id": "v1",
+            "title": "Episode",
+            "duration": 600,
+            "view_count": 100,
+            "upload_date": "20240101",
+        },
+    ])
+
+    def fake_run_ytdlp(args):
+        calls.append(args)
+        return mock
+
+    with patch("backend.pipeline.fetch_videos._run_ytdlp", side_effect=fake_run_ytdlp):
+        videos, _ = fetch_playlist_videos_page("PLabc", start=1, end=50)
+
+    assert calls[0][-1] == "https://www.youtube.com/playlist?list=PLabc"
+    assert "1:50" in calls[0]
+    assert videos[0]["is_short"] is False

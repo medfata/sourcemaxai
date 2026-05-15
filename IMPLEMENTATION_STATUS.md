@@ -34,8 +34,8 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | P2.2 | Migration: extend `usage_events` (`proxy_bytes`, `proxy_provider`) | done | — | agent-p2.2-2026-05-15 | proxy/p2-2-usage-events-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/6 |
 | P2.3 | `Quota` dataclass + `SupabaseQuotaStore` updates for new columns | done | P2.1 | agent-p2.3-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
 | P2.4 | New `check_transcript_fetch` in `quotas.py` (bytes + per-min rate) | todo | P2.3 | | | | |
-| P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | todo | P2.2, P1.4 | | | | |
-| P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | todo | P2.3 | | | | |
+| P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | in_progress | P2.2, P1.4 | agent-p2.5-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | |
+| P2.6 | `OwnerConcurrencyGate` (in-proc semaphore map) integrated into `fetch_transcripts` | in_progress | P2.3 | agent-p2.6-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | |
 | P2.7 | Tests: `test_quotas.py` extensions (proxy bytes limit, per-min rate, concurrency) | todo | P2.4, P2.6 | | | | |
 
 ## Phase 3 — Pipeline Wiring
@@ -44,7 +44,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P3.1 | Thread `owner_id` into `fetch_transcripts(channel_id, owner_id, ...)` from `routes/pipeline.py` | todo | P2.6 | | | | |
 | P3.2 | Quota pre-check in `routes/pipeline.py` returning 402-style block payload | todo | P2.4 | | | | |
-| P3.3 | Worker housekeeping: blocklist cleanup + circuit-breaker probe in `backend/worker.py` | todo | P1.2, P4.1 | | | | |
+| P3.3 | Worker housekeeping: blocklist cleanup + circuit-breaker probe in `backend/worker.py` | in_progress | P1.2, P4.1 | agent-p3.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | |
 | P3.4 | New route `GET /api/quota/proxy-usage` | todo | P2.3 | | | | |
 
 ## Phase 4 — Circuit Breaker
@@ -53,7 +53,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P4.1 | Migration: `proxy_circuit_state` table | done | — | agent-p4.1-2026-05-15 | proxy/p4-1-circuit-state-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/7 |
 | P4.2 | `CircuitBreaker` class in `proxy_pool.py` (closed/half_open/open transitions) | done | P4.1, P1.2 | agent-p4.2-2026-05-15 | proxy/p1-4-p1-5-p2-3-p4-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/8 |
-| P4.3 | Wire breaker into `fetch_with_retry` (skip provider when open) | todo | P4.2, P1.4 | | | | |
+| P4.3 | Wire breaker into `fetch_with_retry` (skip provider when open) | in_progress | P4.2, P1.4 | agent-p4.3-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | |
 | P4.4 | Tests: breaker opens after N failures, half-open probe behavior | todo | P4.2 | | | | |
 
 ## Phase 5 — Frontend
@@ -69,7 +69,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
-| P6.1 | Metrics in `backend/observability.py` (proxy_fetch_total, _bytes, _duration, circuit_state, blocklist_size) | todo | P1.4, P4.2 | | | | |
+| P6.1 | Metrics in `backend/observability.py` (proxy_fetch_total, _bytes, _duration, circuit_state, blocklist_size) | in_progress | P1.4, P4.2 | agent-p6.1-2026-05-15 | proxy/p2-5-p2-6-p4-3-p3-3-p6-1-combined | 2026-05-15 | |
 | P6.2 | Daily summary log: bytes per provider/tier/top-10-users | todo | P2.5 | | | | |
 | P6.3 | Cost reconciliation script: compare `usage_events.proxy_bytes` sum vs provider invoice | todo | P2.5 | | | | |
 

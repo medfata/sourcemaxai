@@ -101,6 +101,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 Append blockers needing user input. Format: `YYYY-MM-DD | session | blocker | resolved? | resolution`.
 
 - 2026-05-15 | agent-p1.1-retry-2026-05-15 | `gh` CLI not installed/in PATH on this host (checked common Windows install paths + scoop shims; no GH_TOKEN env either), so the agent could not run `gh pr create` for P1.1. Branch `proxy/p1-1-blocklist-migration` is pushed with both the claim commit and the migration commit. | open | User to either (a) run `gh pr create --title "P1.1 proxy_blocklist migration" --body ...` locally, or (b) open the PR via the GitHub compare URL printed by `git push`: https://github.com/medfata/sourcemaxai/pull/new/proxy/p1-1-blocklist-migration, then paste the resulting PR URL into the P1.1 row.
+- 2026-05-15 | agent-p1.2-2026-05-15 | `gh` CLI is installed at `/c/Program Files/GitHub CLI/gh` but is not authenticated (`gh auth login` not run) and no `GH_TOKEN` env. Branch `proxy/p1-2-proxy-pool` is pushed with commit `feat(proxy): proxy_pool module ... (P1.2)`. | open | User to either (a) `gh auth login` then `gh pr create --base main --head proxy/p1-2-proxy-pool --title "P1.2: proxy_pool module (ProxyConfig, ProxyPool, BlocklistStore)"` locally, or (b) open the PR via https://github.com/medfata/sourcemaxai/pull/new/proxy/p1-2-proxy-pool, then paste the resulting PR URL into the P1.2 row.
 - 
 
 ## Open Questions (from plan §Open Questions)

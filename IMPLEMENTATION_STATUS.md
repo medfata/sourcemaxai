@@ -31,7 +31,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
 | P2.1 | Migration: extend `plan_tiers` (`proxy_bytes_per_month`, `proxy_requests_per_minute`, `transcript_concurrency`) | in_progress | — | agent-p2.1-2026-05-15 | proxy/p2-1-plan-tiers-migration | 2026-05-15 | |
-| P2.2 | Migration: extend `usage_events` (`proxy_bytes`, `proxy_provider`) | in_progress | — | agent-p2.2-2026-05-15 | proxy/p2-2-usage-events-migration | 2026-05-15 | |
+| P2.2 | Migration: extend `usage_events` (`proxy_bytes`, `proxy_provider`) | in_progress | — | agent-p2.2-2026-05-15 | proxy/p2-2-usage-events-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/new/proxy/p2-2-usage-events-migration (gh auth blocker — see Blocker Log) |
 | P2.3 | `Quota` dataclass + `SupabaseQuotaStore` updates for new columns | todo | P2.1 | | | | |
 | P2.4 | New `check_transcript_fetch` in `quotas.py` (bytes + per-min rate) | todo | P2.3 | | | | |
 | P2.5 | Per-byte logging in `fetch_with_retry` → `record_usage(proxy_bytes=...)` | todo | P2.2, P1.4 | | | | |
@@ -92,6 +92,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 - 2026-05-14 | s-init | Plan accepted, IPRoyal primary + Webshare fallback | cheapest pay-as-you-go + native lib support
 - 2026-05-14 | agent-p1.1-2026-05-14 | `idx_proxy_blocklist_active` dropped `WHERE expires_at > now()` predicate | Postgres rejects non-IMMUTABLE `now()` in partial-index predicates; plain `(provider, expires_at)` btree still serves the active-lookup query (`WHERE provider = ? AND expires_at > now()`) efficiently. Plan §1.2 explicitly allows this adjustment.
 - 2026-05-14 | agent-p1.3-2026-05-14 | Prod validation strictness: require IPROYAL_* host/user/pass, Webshare optional fallback; PROXY_MAX_ATTEMPTS/SESSION_LIFETIME/BLOCKLIST_TTL must be positive ints | Plan §1.4 calls IPRoyal primary and Webshare fallback; rejecting prod boot when Webshare creds missing would block deploys whenever fallback is unused.
+- 2026-05-15 | agent-p2.2-2026-05-15 | P2.2 migration adds `proxy_bytes` + `proxy_provider` to `usage_events` but no new index. The per-minute rate query in P2.4 (`owner_id, event_type, created_at desc`) is already served by `usage_events_owner_event_created_at_idx` created in `20260507201920_phase_6_quotas_usage.sql`. Added two check constraints (proxy_bytes >= 0; proxy_provider not blank when set) to match existing column-validation style on this table.
 - 
 
 ## Blocker Log
@@ -99,6 +100,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 Append blockers needing user input. Format: `YYYY-MM-DD | session | blocker | resolved? | resolution`.
 
 - 2026-05-15 | agent-p1.1-retry-2026-05-15 | `gh` CLI not installed/in PATH on this host (checked common Windows install paths + scoop shims; no GH_TOKEN env either), so the agent could not run `gh pr create` for P1.1. Branch `proxy/p1-1-blocklist-migration` is pushed with both the claim commit and the migration commit. | open | User to either (a) run `gh pr create --title "P1.1 proxy_blocklist migration" --body ...` locally, or (b) open the PR via the GitHub compare URL printed by `git push`: https://github.com/medfata/sourcemaxai/pull/new/proxy/p1-1-blocklist-migration, then paste the resulting PR URL into the P1.1 row.
+- 2026-05-15 | agent-p2.2-2026-05-15 | Same `gh` auth issue as P1.1 retry — `gh` is installed but not logged in (`gh auth login` required) and no `GH_TOKEN` env var available, so `gh pr create` for P2.2 fails with exit 4. Branch `proxy/p2-2-usage-events-migration` is pushed with the migration commit. | open | User to either (a) run `gh auth login` locally then `gh pr create --base main --title "P2.2: usage_events proxy_bytes + proxy_provider columns" --body ...`, or (b) open the PR via https://github.com/medfata/sourcemaxai/pull/new/proxy/p2-2-usage-events-migration, then paste the resulting PR URL into the P2.2 row.
 - 
 
 ## Open Questions (from plan §Open Questions)

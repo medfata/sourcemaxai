@@ -26,6 +26,7 @@ DEFAULT_CHAT_PER_MINUTE_LIMIT = 10
 DEFAULT_PROXY_BYTES_PER_MONTH = 524_288_000
 DEFAULT_PROXY_REQUESTS_PER_MINUTE = 30
 DEFAULT_TRANSCRIPT_CONCURRENCY = 2
+ESTIMATED_BYTES_PER_TRANSCRIPT = 25_000
 
 SUMMARY_INPUT_USD_PER_M_TOKENS = 0.30
 SUMMARY_OUTPUT_USD_PER_M_TOKENS = 1.20
@@ -151,6 +152,10 @@ class QuotaStore(ABC):
         """Return chat events recorded in the last ``window_seconds`` seconds."""
 
     @abstractmethod
+    def proxy_event_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
+        """Return transcript_fetch events recorded in the last ``window_seconds`` seconds."""
+
+    @abstractmethod
     def get_active_credit_seconds(self, owner_id: str) -> int:
         """Return unexpired unused transcript-second credits."""
 
@@ -188,6 +193,9 @@ class LocalQuotaStore(QuotaStore):
         return 0
 
     def chat_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
+        return 0
+
+    def proxy_event_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
         return 0
 
     def get_active_credit_seconds(self, owner_id: str) -> int:
@@ -333,6 +341,20 @@ class SupabaseQuotaStore(QuotaStore):
             filters={
                 "owner_id": self._eq(owner_id),
                 "event_type": self._eq("chat"),
+                "created_at": f"gte.{cutoff.isoformat()}",
+            },
+            limit=500,
+        )
+        return len(rows)
+
+    def proxy_event_count_in_window(self, owner_id: str, *, window_seconds: int) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+        rows = self.backend._select(
+            "usage_events",
+            select="id",
+            filters={
+                "owner_id": self._eq(owner_id),
+                "event_type": self._eq("transcript_fetch"),
                 "created_at": f"gte.{cutoff.isoformat()}",
             },
             limit=500,
@@ -639,6 +661,47 @@ def check_chat_monthly(store: QuotaStore, owner_id: str) -> QuotaDecision:
             "chat_messages_remaining": quota.monthly_chat_messages - usage.chat_messages,
         },
     )
+
+
+def check_transcript_fetch(
+    store: QuotaStore,
+    owner_id: str,
+    *,
+    pending_video_count: int,
+) -> QuotaDecision:
+    """Block transcript fetch if user has no proxy budget left."""
+    if not store.is_enforced:
+        return QuotaDecision(allowed=True)
+
+    quota = store.get_quota(owner_id)
+    usage = store.get_monthly_usage(owner_id)
+
+    projected_bytes = usage.proxy_bytes + pending_video_count * ESTIMATED_BYTES_PER_TRANSCRIPT
+    if projected_bytes > quota.proxy_bytes_per_month:
+        return QuotaDecision(
+            allowed=False,
+            reason="proxy_bytes_limit",
+            detail={
+                "proxy_bytes_used": usage.proxy_bytes,
+                "proxy_bytes_limit": quota.proxy_bytes_per_month,
+                "projected_bytes": projected_bytes,
+                "pending_video_count": pending_video_count,
+            },
+        )
+
+    recent = store.proxy_event_count_in_window(owner_id, window_seconds=60)
+    if recent >= quota.proxy_requests_per_minute:
+        return QuotaDecision(
+            allowed=False,
+            reason="proxy_rate_limit",
+            detail={
+                "limit": quota.proxy_requests_per_minute,
+                "window_seconds": 60,
+                "recent": recent,
+            },
+        )
+
+    return QuotaDecision(allowed=True)
 
 
 def remaining_budget(quota: Quota, usage: MonthlyUsage) -> dict[str, Any]:

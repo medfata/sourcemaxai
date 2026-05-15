@@ -20,7 +20,7 @@ from backend.observability import configure_logging, init_error_reporting  # noq
 configure_logging()
 init_error_reporting()
 
-from backend.routes import channel, chat, pipeline, profile, videos, waitlist  # noqa: E402
+from backend.routes import channel, chat, pipeline, profile, quota, videos, waitlist  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ app.include_router(pipeline.router)
 app.include_router(profile.router)
 app.include_router(chat.router)
 app.include_router(waitlist.router)
+app.include_router(quota.router)
 
 
 @app.middleware("http")

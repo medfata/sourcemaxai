@@ -8,6 +8,7 @@ from backend import storage
 from backend.pipeline import proxy_pool as proxy_pool_module
 from backend.pipeline.proxy_pool import (
     BlocklistStore,
+    CircuitBreaker,
     NoProxyAvailable,
     ProxyConfig,
     ProxyPool,
@@ -37,13 +38,37 @@ class _StubSupabaseBackend:
         self.upsert_calls: list[dict] = []
         self.delete_calls: list[dict] = []
         self._select_return: list[dict] = []
+        self._rows: dict[str, dict[str, dict]] = {}
 
     def _select(self, table, *, select=None, filters=None, limit=None, order=None):
         self.select_calls.append({"table": table, "filters": filters})
+        if table in self._rows:
+            results = []
+            for key, row in self._rows[table].items():
+                if filters:
+                    match = True
+                    for field, filter_expr in filters.items():
+                        if filter_expr.startswith("eq."):
+                            if row.get(field) != filter_expr[3:]:
+                                match = False
+                        else:
+                            match = False
+                    if match:
+                        results.append(row)
+                else:
+                    results.append(row)
+            if limit:
+                results = results[:limit]
+            return results
         return list(self._select_return)
 
     def _upsert(self, table, row, *, on_conflict=None):
         self.upsert_calls.append({"table": table, "row": row, "on_conflict": on_conflict})
+        if table not in self._rows:
+            self._rows[table] = {}
+        conflict_keys = [k.strip() for k in (on_conflict or "id").split(",")]
+        key = tuple(row.get(k, "") for k in conflict_keys)
+        self._rows[table][key] = row
 
     def _delete(self, table, *, filters=None):
         self.delete_calls.append({"table": table, "filters": filters})
@@ -269,3 +294,69 @@ def test_build_proxy_pool_wires_both_providers_when_all_creds_set(monkeypatch):
 
     assert pool is not None
     assert [p.name for p in pool.providers] == ["iproyal", "webshare"]
+
+
+def test_circuit_breaker_opens_after_threshold_failures():
+    backend = _StubSupabaseBackend()
+    breaker = CircuitBreaker(backend, failure_threshold=3)  # type: ignore[arg-type]
+
+    for _ in range(3):
+        breaker.record_failure("iproyal")
+
+    assert breaker.is_open("iproyal") is True
+
+
+def test_circuit_breaker_half_open_probe_after_cool_down():
+    backend = _StubSupabaseBackend()
+    breaker = CircuitBreaker(backend, failure_threshold=2, open_duration_seconds=1)  # type: ignore[arg-type]
+
+    breaker.record_failure("iproyal")
+    breaker.record_failure("iproyal")
+
+    assert breaker.is_open("iproyal") is True
+    assert breaker.should_probe("iproyal") is False
+
+    import time
+    time.sleep(1.1)
+
+    assert breaker.should_probe("iproyal") is True
+
+
+def test_circuit_breaker_success_closes():
+    backend = _StubSupabaseBackend()
+    breaker = CircuitBreaker(backend, failure_threshold=2)  # type: ignore[arg-type]
+
+    breaker.record_failure("iproyal")
+    breaker.record_failure("iproyal")
+    assert breaker.is_open("iproyal") is True
+
+    breaker.record_success("iproyal")
+
+    assert breaker.is_open("iproyal") is False
+
+
+def test_circuit_breaker_half_open_failure_re_opens():
+    backend = _StubSupabaseBackend()
+    breaker = CircuitBreaker(backend, failure_threshold=2, open_duration_seconds=1)  # type: ignore[arg-type]
+
+    breaker.record_failure("iproyal")
+    breaker.record_failure("iproyal")
+    assert breaker.is_open("iproyal") is True
+
+    import time
+    time.sleep(1.1)
+    breaker.should_probe("iproyal")
+
+    breaker.record_failure("iproyal")
+
+    assert breaker.is_open("iproyal") is True
+
+
+def test_circuit_breaker_does_not_open_below_threshold():
+    backend = _StubSupabaseBackend()
+    breaker = CircuitBreaker(backend, failure_threshold=5)  # type: ignore[arg-type]
+
+    breaker.record_failure("iproyal")
+    breaker.record_failure("iproyal")
+
+    assert breaker.is_open("iproyal") is False

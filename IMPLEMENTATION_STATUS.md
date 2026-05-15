@@ -19,7 +19,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 
 | ID | Task | Status | Depends_on | Session | Branch | Started_at | PR |
 |----|------|--------|-----------|---------|--------|------------|-----|
-| P1.1 | Add `proxy_blocklist` migration (SQL in plan §1.2) | todo | — | | | | |
+| P1.1 | Add `proxy_blocklist` migration (SQL in plan §1.2) | in_progress | — | agent-p1.1-retry-2026-05-15 | proxy/p1-1-blocklist-migration | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/3 |
 | P1.2 | New module `backend/pipeline/proxy_pool.py` (`ProxyConfig`, `ProxyPool`, `BlocklistStore`) | todo | P1.1 | | | | |
 | P1.3 | Add proxy env vars to `backend/config.py` + 3 env example files | in_progress | — | agent-p1.3-retry-2026-05-15 | proxy/p1-3-config-env-vars | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/2 |
 | P1.4 | Refactor `fetch_single_transcript` to use `fetch_with_retry(pool, ...)` | todo | P1.2, P1.3 | | | | |
@@ -98,6 +98,7 @@ Append decisions taken during implementation. Format: `YYYY-MM-DD | session | de
 
 Append blockers needing user input. Format: `YYYY-MM-DD | session | blocker | resolved? | resolution`.
 
+- 2026-05-15 | agent-p1.1-retry-2026-05-15 | `gh` CLI not installed/in PATH on this host (checked common Windows install paths + scoop shims; no GH_TOKEN env either), so the agent could not run `gh pr create` for P1.1. Branch `proxy/p1-1-blocklist-migration` is pushed with both the claim commit and the migration commit. | open | User to either (a) run `gh pr create --title "P1.1 proxy_blocklist migration" --body ...` locally, or (b) open the PR via the GitHub compare URL printed by `git push`: https://github.com/medfata/sourcemaxai/pull/new/proxy/p1-1-blocklist-migration, then paste the resulting PR URL into the P1.1 row.
 - 
 
 ## Open Questions (from plan §Open Questions)

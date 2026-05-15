@@ -232,7 +232,8 @@ def fetch_transcripts(
             )
         )
 
-    pool = build_proxy_pool()
+    cfg = load_runtime_config()
+    pool = build_proxy_pool() if cfg.use_proxy_pool else None
 
     results = []
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:

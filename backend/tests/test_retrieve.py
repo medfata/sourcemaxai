@@ -278,6 +278,8 @@ CLOSING_QUERIES: list[str] = [
     "last 15s of every video",
     "end of the video — what does he say",
     "what does the outro say",
+    "how do MrBeast videos typically end?",
+    "how do his videos end usually",
 ]
 
 

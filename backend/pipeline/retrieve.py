@@ -13,6 +13,9 @@ from backend.pipeline.schema_versions import get_chunk_index_stale_reasons
 
 TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 QUOTE_MAX_CHARS = 220
+STRUCTURAL_PER_VIDEO_LIMIT = 1
+STRUCTURAL_HARD_LIMIT = 100
+LEXICAL_GLOBAL_HARD_LIMIT = 60
 
 QueryMode = Literal["lexical", "opening", "closing", "lexical_global"]
 
@@ -557,37 +560,16 @@ def _sort_key(source: dict[str, Any]) -> tuple[float, str, str, float, str]:
     )
 
 
-def retrieve_context(
-    channel_id: str,
-    query: str,
-    scope: ChatScope | None = None,
-    limit: int = 12,
-) -> list[dict]:
-    """Return ranked caption chunks from data/channels/{channel_id}/chunk_index.json.
-
-    The retrieval backend is intentionally lexical and deterministic. It does
-    not refetch transcripts, read raw transcript files, build embeddings, or
-    mutate the chat prompt/citation pipeline.
-    """
-    if limit <= 0:
-        return []
-
-    tokens = _query_tokens(query)
-    if not tokens:
-        return []
-
-    index = _load_current_chunk_index(channel_id)
-    if index is None:
-        return []
-
+def _filter_retrievable_chunks(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+) -> list[dict[str, Any]]:
     chunks = index.get("chunks")
-    if not isinstance(chunks, list) or not chunks:
+    if not isinstance(chunks, list):
         return []
-
-    scored_sources = []
-    seen_chunk_ids = set()
     indexed_video_ids = _indexed_video_ids(index)
-
+    filtered: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
     for chunk in chunks:
         if not _is_retrievable_chunk(chunk):
             continue
@@ -599,16 +581,176 @@ def retrieve_context(
         seen_chunk_ids.add(chunk_id)
         if not _matches_scope(chunk, scope):
             continue
+        filtered.append(chunk)
+    return filtered
 
+
+def _video_count(index: dict[str, Any]) -> int:
+    selected = _indexed_video_ids(index)
+    if selected:
+        return len(selected)
+    chunks = index.get("chunks")
+    if not isinstance(chunks, list):
+        return 0
+    return len(
+        {
+            chunk["video_id"]
+            for chunk in chunks
+            if isinstance(chunk, dict) and isinstance(chunk.get("video_id"), str)
+        }
+    )
+
+
+def _structural_sort_key(source: dict[str, Any]) -> tuple[str, str, float, str]:
+    return (
+        str(source.get("upload_date") or ""),
+        str(source.get("video_id") or ""),
+        float(source.get("start_seconds") or 0),
+        str(source.get("chunk_id") or ""),
+    )
+
+
+def _build_structural_source(chunk: dict[str, Any]) -> dict[str, Any]:
+    text = chunk["text"]
+    compact = " ".join(text.split())
+    return {
+        "kind": "chunk",
+        "chunk_id": chunk["chunk_id"],
+        "video_id": chunk["video_id"],
+        "title": str(chunk.get("title") or ""),
+        "upload_date": str(chunk.get("upload_date") or ""),
+        "start_seconds": chunk["start_seconds"],
+        "end_seconds": chunk["end_seconds"],
+        "quote": _beginning_quote(compact) if compact else "",
+        "text": text,
+        "score": 1.0,
+    }
+
+
+def _retrieve_openings(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+    seconds_window: int,
+    per_video_limit: int = STRUCTURAL_PER_VIDEO_LIMIT,
+) -> list[dict[str, Any]]:
+    by_video: dict[str, list[dict[str, Any]]] = {}
+    for chunk in _filter_retrievable_chunks(index, scope):
+        if float(chunk.get("start_seconds") or 0) > seconds_window:
+            continue
+        by_video.setdefault(chunk["video_id"], []).append(chunk)
+
+    sources: list[dict[str, Any]] = []
+    for video_chunks in by_video.values():
+        video_chunks.sort(
+            key=lambda c: (float(c.get("start_seconds") or 0), str(c.get("chunk_id") or ""))
+        )
+        for chunk in video_chunks[:per_video_limit]:
+            sources.append(_build_structural_source(chunk))
+    sources.sort(key=_structural_sort_key)
+    return sources
+
+
+def _retrieve_closings(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+    seconds_window: int,
+    per_video_limit: int = STRUCTURAL_PER_VIDEO_LIMIT,
+) -> list[dict[str, Any]]:
+    by_video: dict[str, list[dict[str, Any]]] = {}
+    for chunk in _filter_retrievable_chunks(index, scope):
+        by_video.setdefault(chunk["video_id"], []).append(chunk)
+
+    sources: list[dict[str, Any]] = []
+    for video_chunks in by_video.values():
+        proxy_end = max(float(c.get("end_seconds") or 0) for c in video_chunks)
+        threshold = proxy_end - seconds_window
+        candidates = [
+            c for c in video_chunks if float(c.get("end_seconds") or 0) >= threshold
+        ]
+        if not candidates:
+            candidates = list(video_chunks)
+        candidates.sort(
+            key=lambda c: (
+                -float(c.get("start_seconds") or 0),
+                str(c.get("chunk_id") or ""),
+            )
+        )
+        for chunk in candidates[:per_video_limit]:
+            sources.append(_build_structural_source(chunk))
+    sources.sort(key=_structural_sort_key)
+    return sources
+
+
+def _annotate_source_ids(sources: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    limited = sources[:limit] if limit > 0 else []
+    for position, source in enumerate(limited, start=1):
+        source["source_id"] = f"S{position}"
+    return limited
+
+
+def retrieve_context(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None = None,
+    limit: int = 12,
+) -> list[dict]:
+    """Return caption chunks from data/channels/{channel_id}/chunk_index.json.
+
+    Intent-aware dispatch (see classify_query):
+    - opening / closing: structural pick of first/last chunk per video,
+      bypassing lexical scoring so position-based questions still return
+      the correct evidence when the query lacks topical keywords.
+    - lexical_global: lexical scoring with a widened limit so cross-video
+      synthesis questions ('every video', 'across all') can see more
+      videos at once.
+    - lexical (default): lexical scoring with the caller's limit.
+
+    Retrieval remains deterministic — no embeddings, no transcript refetch,
+    no chat-prompt mutation outside the returned sources.
+    """
+    if limit <= 0:
+        return []
+
+    index = _load_current_chunk_index(channel_id)
+    if index is None:
+        return []
+
+    chunks = index.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        return []
+
+    intent = classify_query(query)
+
+    if intent.mode == "opening":
+        window = intent.seconds_window or DEFAULT_OPENING_WINDOW_SECONDS
+        opening_sources = _retrieve_openings(index, scope, window)
+        target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
+        return _annotate_source_ids(opening_sources, limit=target_limit)
+
+    if intent.mode == "closing":
+        window = intent.seconds_window or DEFAULT_CLOSING_WINDOW_SECONDS
+        closing_sources = _retrieve_closings(index, scope, window)
+        target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
+        return _annotate_source_ids(closing_sources, limit=target_limit)
+
+    tokens = _query_tokens(query)
+    if not tokens:
+        return []
+
+    effective_limit = limit
+    if intent.mode == "lexical_global":
+        effective_limit = min(max(limit, 2 * _video_count(index)), LEXICAL_GLOBAL_HARD_LIMIT)
+
+    scored_sources: list[dict[str, Any]] = []
+    for chunk in _filter_retrievable_chunks(index, scope):
         score = _score_chunk(chunk, tokens)
         if score <= 0:
             continue
-
         text = chunk["text"]
         scored_sources.append(
             {
                 "kind": "chunk",
-                "chunk_id": chunk_id,
+                "chunk_id": chunk["chunk_id"],
                 "video_id": chunk["video_id"],
                 "title": str(chunk.get("title") or ""),
                 "upload_date": str(chunk.get("upload_date") or ""),
@@ -621,7 +763,4 @@ def retrieve_context(
         )
 
     scored_sources.sort(key=_sort_key)
-    limited_sources = scored_sources[:limit]
-    for index, source in enumerate(limited_sources, start=1):
-        source["source_id"] = f"S{index}"
-    return limited_sources
+    return _annotate_source_ids(scored_sources, limit=effective_limit)

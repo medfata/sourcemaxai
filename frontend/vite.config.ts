@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 
 import { cloudflare } from "@cloudflare/vite-plugin";
 
-export default defineConfig({
-  plugins: [react(), cloudflare()],
+export default defineConfig(({ command }) => ({
+  plugins: [react(), ...(command === 'build' ? [cloudflare()] : [])],
   server: {
     port: 5173,
     proxy: {
@@ -14,4 +14,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

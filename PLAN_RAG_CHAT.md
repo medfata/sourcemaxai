@@ -148,39 +148,42 @@ Exit criteria: all four demo prompts return answers grounded in correct chunks.
 - **2026-05-16**: Selected Contract C (hybrid) over A (impossible — 455k tokens) and B (wastes summaries pipeline).
 - **2026-05-16**: Defer embeddings until lexical + structural coverage is proven insufficient via real user queries.
 - **2026-05-16**: MiniMax-M2.7-highspeed context confirmed at 204,800 input / 131,072 output tokens. Phase 1 unblocked. No digest truncation needed at current channel sizes (≤100 videos).
+- **2026-05-16**: `SUMMARY_DIGEST_MAX_CHARS=4000`. Plan's example "e.g. 800" undersized the cap relative to the 40-55k token target; with the real MrBeast summaries (43 videos) at cap=4000 the formatted digests measure ~37k chars / ~9.3k tokens, well under the 120k system-prompt budget with headroom for larger channels.
+- **2026-05-16**: Bare verbs `start` / `begin` / `open` are NOT opening-mode triggers — they need a structural phrase ("first N seconds", "how do videos start", "begin with", etc.). Avoids false positives on "I want to start using Feastables" et al.
+- **2026-05-16**: `retrieve_with_coverage` added alongside `retrieve_context`; the original signature stays a thin wrapper so tests mocking `retrieve_context` only need updating if they want coverage. Chat prompt assembly uses the coverage-aware path.
 
 ## Status
 
 | ID | Task | Status | Branch | Started | PR |
 |---|---|---|---|---|---|
-| R1.1 | `load_summary_digests` in storage | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R1.2 | Per-video digest cap | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R1.3 | `VIDEO_DIGESTS` section in prompt | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R1.4 | Updated system prompt rules | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R1.5 | Token estimate telemetry | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R2.1 | `classify_query` + `QueryIntent` | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R2.2 | Intent pattern rules | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R2.3 | Numeric window extraction | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R2.4 | Intent unit tests | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R3.1 | `_retrieve_openings` | todo | — | — | — |
-| R3.2 | `_retrieve_closings` | todo | — | — | — |
-| R3.3 | Dispatcher in `retrieve_context` | todo | — | — | — |
-| R3.4 | Scope filtering preserved | todo | — | — | — |
-| R3.5 | Deterministic structural ordering | todo | — | — | — |
-| R4.1 | Coverage header in source pack | todo | — | — | — |
-| R4.2 | Prompt rule for coverage trust | todo | — | — | — |
-| R4.3 | `missing_openings` gap surfacing | todo | — | — | — |
-| R5.1 | Synthetic chunk index fixture | in_progress | chat/rag-hybrid-summary | 2026-05-16 | — |
-| R5.2 | Opening mode test | todo | — | — | — |
-| R5.3 | Closing mode test | todo | — | — | — |
-| R5.4 | Global limit bump test | todo | — | — | — |
-| R5.5 | Scope filtering test | todo | — | — | — |
-| R5.6 | Digest budget test | todo | — | — | — |
-| R5.7 | End-to-end mock LLM test | todo | — | — | — |
-| R6.1 | Demo: openings question | todo | — | — | — |
-| R6.2 | Demo: global money question | todo | — | — | — |
-| R6.3 | Demo: closings question | todo | — | — | — |
-| R6.4 | Demo: existing narrow question regression | todo | — | — | — |
+| R1.1 | `load_summary_digests` in storage | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R1.2 | Per-video digest cap | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R1.3 | `VIDEO_DIGESTS` section in prompt | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R1.4 | Updated system prompt rules | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R1.5 | Token estimate telemetry | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R2.1 | `classify_query` + `QueryIntent` | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R2.2 | Intent pattern rules | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R2.3 | Numeric window extraction | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R2.4 | Intent unit tests | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R3.1 | `_retrieve_openings` | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R3.2 | `_retrieve_closings` | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R3.3 | Dispatcher in `retrieve_context` | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R3.4 | Scope filtering preserved | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R3.5 | Deterministic structural ordering | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R4.1 | Coverage header in source pack | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R4.2 | Prompt rule for coverage trust | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R4.3 | `missing_openings` gap surfacing | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.1 | Synthetic chunk index fixture | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.2 | Opening mode test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.3 | Closing mode test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.4 | Global limit bump test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.5 | Scope filtering test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.6 | Digest budget test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R5.7 | End-to-end mock LLM test | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R6.1 | Demo: openings question | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R6.2 | Demo: global money question | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R6.3 | Demo: closings question | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
+| R6.4 | Demo: existing narrow question regression | done | chat/rag-hybrid-summary | 2026-05-16 | (single PR) |
 
 ## Blocker Log
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from backend import storage
 from backend.models import ChatScope
@@ -12,6 +13,165 @@ from backend.pipeline.schema_versions import get_chunk_index_stale_reasons
 
 TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 QUOTE_MAX_CHARS = 220
+
+QueryMode = Literal["lexical", "opening", "closing", "lexical_global"]
+
+DEFAULT_OPENING_WINDOW_SECONDS = 30
+DEFAULT_CLOSING_WINDOW_SECONDS = 60
+
+
+# Substring patterns drive intent classification. The lists below are the
+# authoritative rule set (R2.2); keep them in sync with PLAN_RAG_CHAT.md.
+#
+# Opening-mode triggers (any one is sufficient):
+#   - "hook"               structural noun used in YouTube parlance
+#   - "intro"              short for introduction
+#   - "outset"             unambiguous opening phrase
+#   - "start of"           phrase form anchors the bare verb "start"
+#   - "first N seconds"    regex below picks up a numeric window
+#   - "how do videos start", "how does ... begin", "begin with",
+#     "how does it begin", "begin the video", "kick(s|ing) off"
+#   The bare verbs "start", "begin", "open" are NOT triggers on their own
+#   (false positive risk: "I want to start using Feastables").
+_OPENING_SUBSTRINGS: tuple[str, ...] = (
+    "hook",
+    "intro",
+    "outset",
+    "start of",
+    "how do videos start",
+    "how do the videos start",
+    "how do his videos start",
+    "how do her videos start",
+    "how do they start",
+    "begin with",
+    "how does it begin",
+    "how does the video begin",
+    "how does each video begin",
+    "how does every video begin",
+    "begin the video",
+    "kick off",
+    "kicks off",
+    "kicking off",
+)
+
+# Closing-mode triggers:
+#   - "outro"
+#   - "closing"
+#   - "end of"
+#   - "last N seconds"      regex below picks up the numeric window
+#   - "how do videos end", "how does ... end", "end the video",
+#     "wrap up", "wraps up", "wrapping up", "sign off", "signs off"
+_CLOSING_SUBSTRINGS: tuple[str, ...] = (
+    "outro",
+    "closing",
+    "end of",
+    "how do videos end",
+    "how do the videos end",
+    "how do his videos end",
+    "how do her videos end",
+    "how do they end",
+    "how does it end",
+    "how does the video end",
+    "how does each video end",
+    "how does every video end",
+    "end the video",
+    "wrap up",
+    "wraps up",
+    "wrapping up",
+    "sign off",
+    "signs off",
+)
+
+# Cross-video / "global" phrasing. When present and no structural keyword
+# fires, we return lexical_global so the dispatcher (Wave 2) can widen the
+# chunk budget for cross-video synthesis.
+_GLOBAL_SUBSTRINGS: tuple[str, ...] = (
+    "every video",
+    "every episode",
+    "across all",
+    "across every",
+    "each video",
+    "each episode",
+    "all 50",
+    "all of the videos",
+    "in all the videos",
+    "in all videos",
+)
+
+_OPENING_NUMERIC_RE = re.compile(
+    r"first\s+(\d{1,3})\s*(?:s\b|sec\b|secs\b|second\b|seconds\b)",
+    re.IGNORECASE,
+)
+_CLOSING_NUMERIC_RE = re.compile(
+    r"last\s+(\d{1,3})\s*(?:s\b|sec\b|secs\b|second\b|seconds\b)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class QueryIntent:
+    mode: QueryMode
+    seconds_window: int | None
+
+
+def _extract_window(query_lc: str, pattern: re.Pattern[str]) -> int | None:
+    match = pattern.search(query_lc)
+    if match is None:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def classify_query(query: str) -> QueryIntent:
+    """Classify a chat query into a retrieval intent.
+
+    Returns a `QueryIntent` describing how the dispatcher (Wave 2) should
+    pull chunks. Structural modes (`opening`, `closing`) bypass lexical
+    scoring; `lexical_global` keeps lexical scoring but signals the caller
+    to widen the chunk budget for cross-video synthesis.
+    """
+    if not query or not isinstance(query, str):
+        return QueryIntent(mode="lexical", seconds_window=None)
+
+    query_lc = query.casefold()
+
+    opening_window = _extract_window(query_lc, _OPENING_NUMERIC_RE)
+    closing_window = _extract_window(query_lc, _CLOSING_NUMERIC_RE)
+
+    opening_match = opening_window is not None or any(
+        token in query_lc for token in _OPENING_SUBSTRINGS
+    )
+    closing_match = closing_window is not None or any(
+        token in query_lc for token in _CLOSING_SUBSTRINGS
+    )
+
+    if opening_match and not closing_match:
+        window = opening_window if opening_window is not None else DEFAULT_OPENING_WINDOW_SECONDS
+        return QueryIntent(mode="opening", seconds_window=window)
+
+    if closing_match and not opening_match:
+        window = closing_window if closing_window is not None else DEFAULT_CLOSING_WINDOW_SECONDS
+        return QueryIntent(mode="closing", seconds_window=window)
+
+    if opening_match and closing_match:
+        if opening_window is not None and closing_window is None:
+            return QueryIntent(mode="opening", seconds_window=opening_window)
+        if closing_window is not None and opening_window is None:
+            return QueryIntent(mode="closing", seconds_window=closing_window)
+        return QueryIntent(
+            mode="opening",
+            seconds_window=opening_window or DEFAULT_OPENING_WINDOW_SECONDS,
+        )
+
+    if any(token in query_lc for token in _GLOBAL_SUBSTRINGS):
+        return QueryIntent(mode="lexical_global", seconds_window=None)
+
+    return QueryIntent(mode="lexical", seconds_window=None)
 
 STOP_WORDS = {
     "a",

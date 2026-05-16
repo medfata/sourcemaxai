@@ -5,6 +5,11 @@ import tempfile
 
 import pytest
 from backend.models import ChatScope
+from backend.pipeline.retrieve import (
+    DEFAULT_CLOSING_WINDOW_SECONDS,
+    DEFAULT_OPENING_WINDOW_SECONDS,
+    classify_query,
+)
 from backend.pipeline.schema_versions import CHUNK_INDEX_SCHEMA_VERSION
 
 
@@ -242,3 +247,156 @@ def test_quote_contains_matched_terms_when_practical(retrieve_env):
     assert len(results) == 1
     assert "durable retrieval" in results[0]["quote"].casefold()
     assert len(results[0]["quote"]) <= 240
+
+
+OPENING_QUERIES: list[str] = [
+    "what's the hook in every video",
+    "describe the intro of these videos",
+    "what happens at the start of each video",
+    "how do videos start",
+    "how does each video begin",
+    "kick off pattern across videos",
+    "what is the opening hook in the videos",
+    "show me the first 10 seconds of every video",
+    "first 30 seconds — what does he say",
+    "first 5s of each video",
+    "in the first 60 seconds what is mentioned",
+    "begin with what kind of line",
+]
+
+
+CLOSING_QUERIES: list[str] = [
+    "how do videos end",
+    "what is in the outro",
+    "describe the closing minute",
+    "what is at the end of the video",
+    "how does each video end",
+    "wrap up patterns",
+    "how does he sign off",
+    "show me the last 30 seconds",
+    "last 60 seconds across all episodes",
+    "last 15s of every video",
+    "end of the video — what does he say",
+    "what does the outro say",
+]
+
+
+GLOBAL_QUERIES: list[str] = [
+    "what topics appear across all videos",
+    "what is the money trend across every video",
+    "in each video, what is the call to action",
+    "all 50 episodes mention what",
+    "every episode references which sponsor",
+    "across every video, what is the recurring theme",
+    "what people are referenced in all videos",
+    "all of the videos cover what topic",
+    "in all videos, what gets repeated",
+    "what is in every video about food",
+]
+
+
+LEXICAL_QUERIES: list[str] = [
+    "what did he say about feastables",
+    "how much money was given away",
+    "explain the engineering trade offs",
+    "who is the cameraman",
+    "what tool was used in episode three",
+    "is the chocolate bar mentioned",
+    "what is the recurring joke",
+    "tell me about the cooking experiment",
+    "what does he say about sponsors",
+    "summarize the deep dive on architecture",
+]
+
+
+@pytest.mark.parametrize("query", OPENING_QUERIES)
+def test_classify_query_opening_phrasings(query: str) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "opening", f"expected opening for {query!r}, got {intent}"
+    assert intent.seconds_window is not None
+    assert intent.seconds_window > 0
+
+
+@pytest.mark.parametrize("query", CLOSING_QUERIES)
+def test_classify_query_closing_phrasings(query: str) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "closing", f"expected closing for {query!r}, got {intent}"
+    assert intent.seconds_window is not None
+    assert intent.seconds_window > 0
+
+
+@pytest.mark.parametrize("query", GLOBAL_QUERIES)
+def test_classify_query_global_phrasings(query: str) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "lexical_global", f"expected lexical_global for {query!r}, got {intent}"
+    assert intent.seconds_window is None
+
+
+@pytest.mark.parametrize("query", LEXICAL_QUERIES)
+def test_classify_query_lexical_default(query: str) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "lexical", f"expected lexical for {query!r}, got {intent}"
+    assert intent.seconds_window is None
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("first 10 seconds of every video", 10),
+        ("first 30 seconds", 30),
+        ("first 5s of each video", 5),
+        ("first 60 secs across the videos", 60),
+        ("FIRST 45 Seconds", 45),
+    ],
+)
+def test_classify_query_opening_numeric_window(query: str, expected: int) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "opening"
+    assert intent.seconds_window == expected
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("last 10 seconds", 10),
+        ("show me the last 30 seconds of every video", 30),
+        ("last 60s across episodes", 60),
+        ("last 5 sec of each video", 5),
+        ("LAST 90 seconds", 90),
+    ],
+)
+def test_classify_query_closing_numeric_window(query: str, expected: int) -> None:
+    intent = classify_query(query)
+    assert intent.mode == "closing"
+    assert intent.seconds_window == expected
+
+
+def test_classify_query_default_windows() -> None:
+    opening = classify_query("describe the intro of every video")
+    assert opening.mode == "opening"
+    assert opening.seconds_window == DEFAULT_OPENING_WINDOW_SECONDS
+
+    closing = classify_query("describe the outro of every video")
+    assert closing.mode == "closing"
+    assert closing.seconds_window == DEFAULT_CLOSING_WINDOW_SECONDS
+
+
+@pytest.mark.parametrize(
+    "query,expected_mode",
+    [
+        ("I want to start using Feastables", "lexical"),
+        ("how do I begin investing", "lexical"),
+        ("an open conversation about engineering", "lexical"),
+        ("we should start a new project together", "lexical"),
+    ],
+)
+def test_classify_query_does_not_overfit_on_bare_verbs(query: str, expected_mode: str) -> None:
+    intent = classify_query(query)
+    assert intent.mode == expected_mode, f"{query!r} should be {expected_mode}, got {intent}"
+
+
+def test_classify_query_empty_and_none_safe() -> None:
+    for query in ("", "   "):
+        intent = classify_query(query)
+        assert intent.mode == "lexical"
+        assert intent.seconds_window is None

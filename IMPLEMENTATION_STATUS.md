@@ -81,7 +81,7 @@ Session ID format: any short identifier (e.g. `s-2026-05-14-a`, your branch name
 | P7.2 | Shadow mode: log intended proxy without using it | done | P7.1 | agent-p5-2-p7-2-2026-05-15 | proxy/p5-2-p7-2-combined | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/12 |
 | P7.3 | 10% canary by `owner_id % 10 == 0` | done | P3.1, P3.2 | agent-p7-3-2026-05-15 | proxy/p7-3-canary | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/13 |
 | P7.4 | Full cutover; monitor 48h | done | P7.3, P6.1 | agent-p7-4-2026-05-15 | proxy/p7-4-cutover-runbook | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/14 |
-| P7.5 | Remove direct-fetch path from `fetch_transcripts.py` | in_progress | P7.4 | agent-p7-5-2026-05-15 | proxy/p7-5-rip-rollout-scaffolding | 2026-05-15 | |
+| P7.5 | Remove direct-fetch path from `fetch_transcripts.py` | done | P7.4 | agent-p7-5-2026-05-15 | proxy/p7-5-rip-rollout-scaffolding | 2026-05-15 | https://github.com/medfata/sourcemaxai/pull/15 |
 
 ---
 

@@ -108,19 +108,15 @@
 
 .studio-brand-mark,
 .studio-resolve-mark {
-  background: var(--studio-ink);
-  color: var(--studio-bg);
-  display: grid;
-  place-items: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 700;
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .studio-brand-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  font-size: 12px;
+  width: 26px;
+  height: 26px;
 }
 
 .studio-brand-name {
@@ -1275,11 +1271,10 @@
 }
 
 .studio-resolve-mark {
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
   margin-bottom: 16px;
-  border-radius: 13px;
-  font-size: 18px;
+  filter: drop-shadow(0 6px 14px rgba(217, 4, 41, 0.18));
 }
 
 .studio-resolve-card h1,

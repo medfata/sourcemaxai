@@ -855,10 +855,10 @@ export default function ChatPage({
                 transition={{ duration: 0.24 }}
                 className={`trace-msg ${msg.role === 'user' ? 'user' : 'assist'}`}
               >
-                <div className="trace-msg-av">{msg.role === 'user' ? 'Y' : 'T'}</div>
+                <div className="trace-msg-av">{msg.role === 'user' ? 'Y' : 'S'}</div>
                 <div className="trace-msg-body">
                   <div className="trace-msg-meta">
-                    <b>{msg.role === 'user' ? 'You' : 'Trace'}</b>
+                    <b>{msg.role === 'user' ? 'You' : 'Sourcemax'}</b>
                     <span>·</span>
                     <span>{msg.role === 'user' ? 'now' : `${refs.length} source${refs.length === 1 ? '' : 's'}`}</span>
                   </div>
@@ -874,7 +874,7 @@ export default function ChatPage({
                       <MessageSources refs={refs} channelName={channel.channel_name} onOpen={openSource} />
                     </>
                   ) : streaming && idx === messages.length - 1 ? (
-                    <div className="trace-thinking" aria-label="Trace is thinking">
+                    <div className="trace-thinking" aria-label="Sourcemax is thinking">
                       <span />
                       <span />
                       <span />
@@ -887,7 +887,7 @@ export default function ChatPage({
 
           {error && (
             <div className="trace-msg assist">
-              <div className="trace-msg-av">T</div>
+              <div className="trace-msg-av">S</div>
               <div className="trace-error">
                 <b>{error}</b>
                 <button type="button" onClick={retryLast}>Retry</button>

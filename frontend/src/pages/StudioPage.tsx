@@ -1254,8 +1254,8 @@ function StudioSidebar({
     <aside className="studio-side">
       <div className="studio-side-top">
         <div className="studio-brand">
-          <div className="studio-brand-mark">T</div>
-          <div className="studio-brand-name">Trace<sup>STUDIO</sup></div>
+          <img className="studio-brand-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
+          <div className="studio-brand-name">Sourcemax<sup>STUDIO</sup></div>
         </div>
         <button type="button" className="studio-icon-btn" aria-label="More">
           <Icons.More />
@@ -1610,9 +1610,9 @@ function NoChannelPanel({
   return (
     <div className="studio-centered">
       <div className="studio-resolve-card">
-        <div className="studio-resolve-mark">T</div>
-        <h1>Trace a channel.</h1>
-        <p>Paste a YouTube URL or handle. Trace will fetch the library, let you choose the slice to profile, and keep the chat cited to source.</p>
+        <img className="studio-resolve-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
+        <h1>Sourcemax a channel.</h1>
+        <p>Paste a YouTube URL or handle. Sourcemax will fetch the library, let you choose the slice to profile, and keep the chat cited to source.</p>
         <form className="studio-resolve-form" onSubmit={handleSubmit}>
           <input
             value={value}
@@ -1622,7 +1622,7 @@ function NoChannelPanel({
           />
           <button type="submit" className="studio-btn primary" disabled={resolving}>
             {resolving ? <span className="studio-spinner" /> : <Icons.Arrow />}
-            Trace
+            Sourcemax
           </button>
         </form>
         {error && <div className="studio-form-error">{error}</div>}
@@ -2348,13 +2348,14 @@ function ProgressPanel({
   const runId = typeof pipeline?.run_id === 'string' ? pipeline.run_id : null
   const pipelineStatus = pipeline?.status
   const currentStage = pipeline?.current_stage
+  const transcriptVideos = pipeline?.stages?.transcripts?.videos ?? {}
   const hasSummarizableTranscript = useMemo(
-    () => Object.values(statusMap).some((v) => v.status === 'done' || v.status === 'skipped'),
-    [statusMap],
+    () => Object.values(transcriptVideos).some((v) => v.status === 'done' || v.status === 'skipped'),
+    [transcriptVideos],
   )
   const hasCompletedTranscript = useMemo(
-    () => Object.values(statusMap).some((v) => v.status === 'done'),
-    [statusMap],
+    () => Object.values(transcriptVideos).some((v) => v.status === 'done'),
+    [transcriptVideos],
   )
   const transcriptsRunning =
     (pipelineStatus === 'running' || pipelineStatus === 'queued') &&

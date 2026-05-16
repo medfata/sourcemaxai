@@ -140,9 +140,9 @@ function App() {
     return (
       <div className="app-boot">
         <div className="app-boot-card">
-          <span className="app-boot-mark">T</span>
+          <img className="app-boot-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
           <span className="app-boot-spinner" aria-hidden />
-          <span>Loading Trace</span>
+          <span>Loading Sourcemax</span>
         </div>
       </div>
     )

@@ -21,17 +21,30 @@ const EXAMPLE_CHIPS = [
   { label: '@lexfridman', value: 'youtube.com/@lexfridman' },
 ]
 
-const THEMES = [
-  { name: 'Federal Reserve policy', pct: 34, color: '#E5322B' },
-  { name: 'Treasury yields & duration', pct: 22, color: '#2A2A2E' },
-  { name: 'Consumer credit cycle', pct: 17, color: '#6B5B95' },
-  { name: 'Commodities & inflation', pct: 14, color: '#88B04B' },
+interface ThemeCite {
+  n: number
+  ts: string
+}
+
+interface ThemeRow {
+  num: string
+  name: string
+  pct: number
+  count: number
+  cites: ThemeCite[]
+}
+
+const THEMES: ThemeRow[] = [
+  { num: '01', name: 'Polished but unfinished',   pct: 28, count: 14, cites: [{ n: 1, ts: '12:08' }, { n: 2, ts: '04:42' }] },
+  { num: '02', name: 'The boring innovation era', pct: 19, count: 9,  cites: [{ n: 3, ts: '01:33' }] },
+  { num: '03', name: 'Foldables as the test bed', pct: 14, count: 8,  cites: [{ n: 4, ts: '18:27' }] },
+  { num: '04', name: 'The review threshold',      pct: 9,  count: 6,  cites: [] },
 ]
 
 const HOW_STEPS = [
-  { n: '01', title: 'Paste a channel', body: 'URL or @handle from YouTube.' },
-  { n: '02', title: 'Build the profile', body: 'Themes, claims, tone, evidence.' },
-  { n: '03', title: 'Search with citations', body: 'Every answer links back to the source.' },
+  { n: '01', title: 'Paste a channel', body: 'URL or @handle. Sourcemax fetches every video.' },
+  { n: '02', title: 'We transcribe & synthesize', body: 'Captions, ASR fallback, then themes, claims & tone.' },
+  { n: '03', title: 'Ask anything, cited', body: 'Every answer links back to the exact timestamp.' },
 ]
 
 function YouTubeGlyph() {
@@ -72,9 +85,9 @@ function LockIcon() {
 
 function BrandMark() {
   return (
-    <span className="landing-brand" aria-label="Trace home">
-      <span className="landing-brand-mark" aria-hidden>T</span>
-      <span>Trace</span>
+    <span className="landing-brand" aria-label="Sourcemax home">
+      <img className="landing-brand-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
+      <span>Sourcemax</span>
     </span>
   )
 }
@@ -83,29 +96,30 @@ function ProfileCard() {
   return (
     <div className="landing-card landing-layer landing-layer-profile">
       <div className="landing-card-head">
-        <span className="landing-kicker">Channel profile</span>
-        <span className="landing-tag">
+        <span className="landing-kicker">Channel · profile</span>
+        <span className="landing-tag landing-tag-confidence">
           <span className="landing-dot-green" />
-          Indexed
+          87% confidence
         </span>
       </div>
       <div className="landing-profile">
-        <div className="landing-profile-avatar">LR</div>
+        <div className="landing-profile-avatar">
+          <img src="/mkbhd.jpg" alt="Marques Brownlee" />
+        </div>
         <div className="landing-profile-body">
-          <div className="landing-profile-name">
-            Lyn Robinson Macro
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M12 2 9.5 6 5 7l3.5 3.5L8 15l4-2 4 2-.5-4.5L19 7l-4.5-1z" />
-            </svg>
-          </div>
-          <div className="landing-profile-handle">@lynmacro - 412K subs</div>
+          <div className="landing-profile-name">Marques Brownlee</div>
+          <div className="landing-profile-handle">@mkbhd · 19.4M subs</div>
           <div className="landing-profile-stats">
-            <span><b>238</b> videos</span>
-            <span><b>1,847</b> claims</span>
-            <span><b>14</b> themes</span>
+            <span><b>47</b>/412 videos</span>
+            <span><b>4h 22m</b> analyzed</span>
+            <span>refreshed <b>12m ago</b></span>
           </div>
         </div>
       </div>
+      <p className="landing-profile-fingerprint">
+        <span className="landing-profile-fingerprint-mark" aria-hidden>“</span>
+        Polished, comparative, and quietly skeptical of flagship innovation.
+      </p>
     </div>
   )
 }
@@ -116,29 +130,32 @@ function ThemesCard() {
       <div className="landing-card-head">
         <div className="landing-card-title">
           <span className="landing-card-dot" />
-          <span className="landing-kicker">Recurring themes - last 90d</span>
+          <span className="landing-kicker">Dominant themes · last 12mo</span>
         </div>
-        <div className="landing-card-actions">
-          <span />
-          <span />
-        </div>
+        <span className="landing-kicker landing-kicker-small">4 clusters</span>
       </div>
-      <div className="landing-themes">
+      <ul className="landing-themes-list">
         {THEMES.map((theme) => (
-          <div className="landing-theme" key={theme.name}>
-            <div className="landing-theme-label">
-              <span className="landing-theme-dot" style={{ background: theme.color }} />
+          <li className="landing-theme-row" key={theme.num}>
+            <span className="landing-theme-num">{theme.num}</span>
+            <div className="landing-theme-body">
               <span className="landing-theme-name">{theme.name}</span>
+              <div className="landing-theme-cites">
+                {theme.cites.map((c) => (
+                  <span className="landing-theme-cite" key={c.n}>
+                    <span className="landing-theme-cite-num">[{c.n}]</span>
+                    <span className="landing-theme-cite-ts">{c.ts}</span>
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="landing-theme-meta">
-              <span className="landing-theme-bar">
-                <span style={{ width: `${(theme.pct / 34) * 100}%`, background: theme.color }} />
-              </span>
-              <span className="landing-theme-pct">{theme.pct}%</span>
+            <div className="landing-theme-stat">
+              <span className="landing-theme-pct">{theme.pct}<i>%</i></span>
+              <span className="landing-theme-count">{theme.count} vids</span>
             </div>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   )
 }
@@ -147,22 +164,23 @@ function ClaimCard() {
   return (
     <div className="landing-card landing-layer landing-layer-claim">
       <div className="landing-card-head">
-        <span className="landing-kicker">Claim - extracted</span>
-        <span className="landing-tag">
-          <span className="landing-dot-red" />
-          Cited 3x
+        <span className="landing-kicker">Claim · extracted</span>
+        <span className="landing-tag landing-tag-cite">
+          <span className="landing-tag-cite-dot" />
+          [1] · 12:08
         </span>
       </div>
       <div className="landing-claim">
         <div className="landing-claim-quote">
-          The Fed will cut <span>at least two times before September</span>, even if core inflation prints above 3.
+          “…the hardware is so polished it almost forgives the software —{' '}
+          <span>a beautifully finished prototype, not a finished product</span>.”
         </div>
         <div className="landing-claim-meta">
           <span className="landing-tag landing-tag-confidence">
             <span className="landing-dot-green" />
             High confidence
           </span>
-          <span className="landing-tag">topic - Fed policy</span>
+          <span className="landing-tag landing-tag-mono">Vision Pro review</span>
         </div>
       </div>
     </div>
@@ -173,7 +191,8 @@ function EvidenceCard() {
   return (
     <div className="landing-card landing-layer landing-layer-evidence">
       <div className="landing-card-head">
-        <span className="landing-kicker">Evidence - jump to source</span>
+        <span className="landing-kicker">Source · jump to transcript</span>
+        <span className="landing-evidence-cite-num">[1]</span>
       </div>
       <div className="landing-evidence">
         <div className="landing-thumb">
@@ -181,16 +200,23 @@ function EvidenceCard() {
           <svg className="landing-thumb-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
             <path d="M8 5v14l11-7z" />
           </svg>
-          <span className="landing-thumb-time">12:43</span>
+          <span className="landing-thumb-time">24:09</span>
         </div>
         <div className="landing-evidence-body">
-          <div className="landing-evidence-title">Why I am still long duration - March macro update</div>
+          <div className="landing-evidence-title">Apple Vision Pro Review: Magic, Until It&apos;s Not.</div>
           <div className="landing-evidence-meta">
-            <span>12:43</span>
-            <span>-</span>
-            <span>transcript line 184</span>
+            <span>@mkbhd</span>
+            <span>·</span>
+            <span>1mo ago</span>
+            <span>·</span>
+            <span className="landing-evidence-ts">▸ 12:08</span>
           </div>
         </div>
+      </div>
+      <div className="landing-evidence-transcript">
+        <span className="landing-evidence-transcript-pre">…forgives the software —</span>{' '}
+        <span className="landing-evidence-transcript-hl">a beautifully finished prototype, not a finished product</span>
+        <span className="landing-evidence-transcript-post">, and that gap is what most reviews…</span>
       </div>
     </div>
   )
@@ -200,7 +226,7 @@ function ProductPreview() {
   return (
     <aside className="landing-preview landing-fade-up d5" aria-label="Product preview">
       <div className="landing-preview-label">
-        <span>What you get</span>
+        <span>A real channel, traced</span>
         <span className="landing-preview-line" aria-hidden />
       </div>
       <ProfileCard />
@@ -273,15 +299,25 @@ export default function LandingPage({ signedIn, onLogin, onOpenChannels, onAnaly
 
       <main className="landing-shell">
         <section className="landing-hero">
+          <img
+            className="landing-hero-mark landing-fade-up d1"
+            src="/sourcemax_icon.png"
+            alt=""
+            aria-hidden
+          />
           <div className="landing-badge landing-fade-up d1">
             <span className="landing-badge-dot" aria-hidden />
-            <span>AI-powered creator analysis</span>
+            <span>Private beta · cited creator profiles</span>
           </div>
 
-          <h1 className="landing-headline landing-fade-up d2">Map any YouTube channel in minutes.</h1>
+          <h1 className="landing-headline landing-fade-up d2">
+            Map any <span className="landing-yt-glow">YouTube</span>
+            <br />
+            channel in minutes.
+          </h1>
 
           <p className="landing-sub landing-fade-up d3">
-            Trace profiles creators by themes, claims, tone, and evidence, with citations back to the original videos.
+            Sourcemax turns a creator&apos;s last year of video into a profile of themes, claims, and tone — every line cited back to the exact timestamp.
           </p>
 
           <div className="landing-fade-up d4">
@@ -311,11 +347,11 @@ export default function LandingPage({ signedIn, onLogin, onOpenChannels, onAnaly
                   aria-describedby={state === 'error' ? 'landing-form-error' : undefined}
                 />
               </div>
-              <button className="landing-button" type="submit" disabled={state === 'loading'}>
+              <button className={`landing-button${state === 'loading' ? ' is-analyzing' : ''}`} type="submit" disabled={state === 'loading'}>
                 {state === 'loading' ? (
                   <>
                     <span className="landing-spinner" aria-hidden />
-                    <span>Analyzing...</span>
+                    <span>Analyzing…</span>
                   </>
                 ) : (
                   <>
@@ -336,7 +372,7 @@ export default function LandingPage({ signedIn, onLogin, onOpenChannels, onAnaly
                 <span className="landing-lock">
                   <LockIcon />
                 </span>
-                <span>You&apos;ll sign in before analysis starts.</span>
+                <span>You&apos;ll sign in before the pipeline starts.</span>
               </div>
             )}
 

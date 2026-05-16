@@ -96,7 +96,7 @@ export default function ChannelInputPage({
       <div className="relative max-w-6xl mx-auto px-6 pt-8 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="w-7 h-7 rounded-lg bg-gradient-aurora" />
-          <span className="text-[15px] font-semibold tracking-tight text-ink-900 dark:text-cream">Trace</span>
+          <span className="text-[15px] font-semibold tracking-tight text-ink-900 dark:text-cream">Sourcemax</span>
         </div>
         <span className="text-[12px] uppercase tracking-[0.18em] text-ink-400">v1 · beta</span>
       </div>
@@ -119,7 +119,7 @@ export default function ChannelInputPage({
           transition={{ duration: 0.6, delay: 0.05 }}
           className="text-[44px] sm:text-[68px] lg:text-[84px] leading-[0.95] tracking-tighter text-ink-900 dark:text-cream font-display text-balance"
         >
-          Trace any YouTube creator.<br />
+          Sourcemax any YouTube creator.<br />
           <em className="italic gradient-text not-italic font-display">In minutes, not months.</em>
         </motion.h1>
 

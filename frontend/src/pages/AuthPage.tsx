@@ -57,9 +57,9 @@ function CheckIcon() {
 
 function TraceMark({ onBackHome }: { onBackHome: () => void }) {
   return (
-    <button type="button" className="auth-brand" onClick={onBackHome} aria-label="Trace home">
-      <span className="auth-brand-mark" aria-hidden>T</span>
-      <span>Trace</span>
+    <button type="button" className="auth-brand" onClick={onBackHome} aria-label="Sourcemax home">
+      <img className="auth-brand-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
+      <span>Sourcemax</span>
     </button>
   )
 }
@@ -113,7 +113,7 @@ export default function AuthPage({ onBackHome, onJoinWaitlist }: AuthPageProps) 
         <TraceMark onBackHome={onBackHome} />
         <div className="auth-nav-actions">
           <button type="button" className="auth-nav-link" onClick={onBackHome}>
-            Back to Trace
+            Back to Sourcemax
           </button>
           <button type="button" className="auth-nav-link auth-nav-waitlist" onClick={onJoinWaitlist}>
             <span className="auth-nav-dot" aria-hidden />
@@ -126,7 +126,7 @@ export default function AuthPage({ onBackHome, onJoinWaitlist }: AuthPageProps) 
         <section className="auth-hero">
           <div className="auth-badge auth-fade-up d1">
             <span className="auth-badge-dot" aria-hidden />
-            <span>Secure Trace workspace</span>
+            <span>Secure Sourcemax workspace</span>
           </div>
 
           <h1 className="auth-headline auth-fade-up d2">
@@ -135,7 +135,7 @@ export default function AuthPage({ onBackHome, onJoinWaitlist }: AuthPageProps) 
 
           <p className="auth-sub auth-fade-up d3">
             {isSignup
-              ? 'Save channels, citations, and chat history under one Trace account.'
+              ? 'Save channels, citations, and chat history under one Sourcemax account.'
               : 'Open your saved YouTube channel profiles, cited answers, and pipeline history.'}
           </p>
 
@@ -150,7 +150,7 @@ export default function AuthPage({ onBackHome, onJoinWaitlist }: AuthPageProps) 
           <div className="auth-panel-head">
             <span className="auth-kicker">{isSignup ? 'Create workspace' : 'Secure access'}</span>
             <h2>{isSignup ? 'Create account' : 'Sign in'}</h2>
-            <p>{isSignup ? 'Use email and password to start a private Trace workspace.' : 'Use email and password to continue where you left off.'}</p>
+            <p>{isSignup ? 'Use email and password to start a private Sourcemax workspace.' : 'Use email and password to continue where you left off.'}</p>
           </div>
 
           <div className="auth-mode" role="tablist" aria-label="Authentication mode">

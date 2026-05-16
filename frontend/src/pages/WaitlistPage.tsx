@@ -15,12 +15,31 @@ type SubmitState = 'idle' | 'loading' | 'success' | 'error'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const THEMES = [
-  { name: 'Federal Reserve policy', pct: 34, color: '#E5322B' },
-  { name: 'Treasury yields & duration', pct: 22, color: '#2A2A2E' },
-  { name: 'Consumer credit cycle', pct: 17, color: '#6B5B95' },
-  { name: 'Commodities & inflation', pct: 14, color: '#88B04B' },
-  { name: 'Equity rotation', pct: 9, color: '#C7522A' },
+interface ThemeCite {
+  n: number
+  ts: string
+}
+
+interface ThemeRow {
+  num: string
+  name: string
+  pct: number
+  count: number
+  cites: ThemeCite[]
+}
+
+const THEMES: ThemeRow[] = [
+  { num: '01', name: 'Polished but unfinished',   pct: 28, count: 14, cites: [{ n: 1, ts: '12:08' }, { n: 2, ts: '04:42' }] },
+  { num: '02', name: 'The boring innovation era', pct: 19, count: 9,  cites: [{ n: 3, ts: '01:33' }] },
+  { num: '03', name: 'Foldables as the test bed', pct: 14, count: 8,  cites: [{ n: 4, ts: '18:27' }] },
+  { num: '04', name: 'The review threshold',      pct: 9,  count: 6,  cites: [] },
+]
+
+const PROOF_AVATARS = [
+  { initials: 'JN', cls: 'wl-avatar-1' },
+  { initials: 'RP', cls: 'wl-avatar-2' },
+  { initials: 'MK', cls: 'wl-avatar-3' },
+  { initials: 'SL', cls: 'wl-avatar-4' },
 ]
 
 function MailIcon({ size = 16 }: { size?: number }) {
@@ -59,20 +78,11 @@ function AlertIcon() {
   )
 }
 
-function SearchIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  )
-}
-
 function TraceMark({ onBackHome }: { onBackHome: () => void }) {
   return (
-    <button type="button" className="wl-brand" onClick={onBackHome} aria-label="Trace home">
-      <span className="wl-brand-mark" aria-hidden>T</span>
-      <span>Trace</span>
+    <button type="button" className="wl-brand" onClick={onBackHome} aria-label="Sourcemax home">
+      <img className="wl-brand-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
+      <span>Sourcemax</span>
     </button>
   )
 }
@@ -83,7 +93,7 @@ function Nav({ signedIn, onBackHome, onLogin, onOpenChannels }: WaitlistPageProp
       <TraceMark onBackHome={onBackHome} />
       <div className="wl-nav-actions">
         <button type="button" className="wl-nav-link" onClick={onBackHome}>
-          Back to Trace
+          Back to Sourcemax
         </button>
         <button type="button" className="wl-nav-link wl-nav-link-strong" onClick={signedIn ? onOpenChannels : onLogin}>
           {signedIn ? 'Open app' : 'Sign in'}
@@ -93,12 +103,35 @@ function Nav({ signedIn, onBackHome, onLogin, onOpenChannels }: WaitlistPageProp
   )
 }
 
+function Proof() {
+  return (
+    <div className="wl-proof fade-up d5">
+      <div className="wl-avatars" aria-hidden>
+        {PROOF_AVATARS.map((a) => (
+          <div className={`wl-avatar ${a.cls}`} key={a.initials}>{a.initials}</div>
+        ))}
+      </div>
+      <span>Built with analysts, journalists and creators tracking dozens of channels at a time.</span>
+    </div>
+  )
+}
+
 function SearchCard() {
   return (
     <div className="wl-card wl-search-card wl-layer wl-layer-search">
-      <SearchIcon />
-      <div className="wl-query">where does she stand on rate cuts<span className="wl-cursor" /></div>
-      <span className="wl-kbd">K</span>
+      <span className="wl-search-prefix" aria-hidden>
+        <img className="wl-search-mark" src="/sourcemax_icon.png" alt="" />
+        <span className="wl-search-arrow">›</span>
+      </span>
+      <div className="wl-query">
+        what does MKBHD keep coming back to about Apple
+        <span className="wl-cursor" />
+      </div>
+      <span className="wl-grounded" title="Grounded in MKBHD's profile">
+        <span className="wl-grounded-dot" />
+        grounded
+      </span>
+      <span className="wl-kbd">↵</span>
     </div>
   )
 }
@@ -107,31 +140,30 @@ function ProfileCard() {
   return (
     <div className="wl-card wl-layer wl-layer-profile">
       <div className="wl-card-head">
-        <div className="wl-card-title">
-          <span className="wl-kicker">Channel profile</span>
-        </div>
-        <span className="wl-tag">
+        <span className="wl-kicker">Channel · profile</span>
+        <span className="wl-tag wl-tag-confidence">
           <span className="wl-dot-green" />
-          Indexed
+          87% confidence
         </span>
       </div>
       <div className="wl-profile">
-        <div className="wl-profile-avatar">LR</div>
+        <div className="wl-profile-avatar">
+          <img src="/mkbhd.jpg" alt="Marques Brownlee" />
+        </div>
         <div className="wl-profile-body">
-          <div className="wl-profile-name">
-            Lyn Robinson Macro
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M12 2 9.5 6 5 7l3.5 3.5L8 15l4-2 4 2-.5-4.5L19 7l-4.5-1z" />
-            </svg>
-          </div>
-          <div className="wl-profile-handle">@lynmacro - 412K subs</div>
+          <div className="wl-profile-name">Marques Brownlee</div>
+          <div className="wl-profile-handle">@mkbhd · 19.4M subs</div>
           <div className="wl-profile-stats">
-            <span><b>238</b> videos</span>
-            <span><b>1,847</b> claims</span>
-            <span><b>14</b> themes</span>
+            <span><b>47</b>/412 videos</span>
+            <span><b>4h 22m</b> analyzed</span>
+            <span>refreshed <b>12m ago</b></span>
           </div>
         </div>
       </div>
+      <p className="wl-profile-fingerprint">
+        <span className="wl-profile-fingerprint-mark" aria-hidden>“</span>
+        Polished, comparative, and quietly skeptical of flagship innovation.
+      </p>
     </div>
   )
 }
@@ -142,29 +174,32 @@ function ThemesCard() {
       <div className="wl-card-head">
         <div className="wl-card-title">
           <span className="wl-card-dot" />
-          <span className="wl-kicker">Recurring themes - last 90d</span>
+          <span className="wl-kicker">Dominant themes · last 12mo</span>
         </div>
-        <div className="wl-card-actions">
-          <span />
-          <span />
-        </div>
+        <span className="wl-kicker wl-kicker-small">4 clusters</span>
       </div>
-      <div className="wl-themes">
+      <ul className="wl-themes-list">
         {THEMES.map((theme) => (
-          <div className="wl-theme" key={theme.name}>
-            <div className="wl-theme-label">
-              <span className="wl-theme-dot" style={{ background: theme.color }} />
+          <li className="wl-theme-row" key={theme.num}>
+            <span className="wl-theme-num">{theme.num}</span>
+            <div className="wl-theme-body">
               <span className="wl-theme-name">{theme.name}</span>
+              <div className="wl-theme-cites">
+                {theme.cites.map((c) => (
+                  <span className="wl-theme-cite" key={c.n}>
+                    <span className="wl-theme-cite-num">[{c.n}]</span>
+                    <span className="wl-theme-cite-ts">{c.ts}</span>
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="wl-theme-meta">
-              <span className="wl-theme-bar">
-                <span style={{ width: `${(theme.pct / 34) * 100}%`, background: theme.color }} />
-              </span>
-              <span className="wl-theme-pct">{theme.pct}%</span>
+            <div className="wl-theme-stat">
+              <span className="wl-theme-pct">{theme.pct}<i>%</i></span>
+              <span className="wl-theme-count">{theme.count} vids</span>
             </div>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   )
 }
@@ -173,25 +208,23 @@ function ClaimCard() {
   return (
     <div className="wl-card wl-layer wl-layer-claim">
       <div className="wl-card-head">
-        <div className="wl-card-title">
-          <span className="wl-kicker">Claim - extracted</span>
-        </div>
-        <span className="wl-tag">
-          <span className="wl-dot-red" />
-          Cited 3x
+        <span className="wl-kicker">Claim · extracted</span>
+        <span className="wl-tag wl-tag-cite">
+          <span className="wl-tag-cite-dot" />
+          [1] · 12:08
         </span>
       </div>
       <div className="wl-claim">
         <div className="wl-claim-quote">
-          The Fed will cut <span>at least two times before September</span>, even if core inflation prints above 3.
+          “…the hardware is so polished it almost forgives the software —{' '}
+          <span>a beautifully finished prototype, not a finished product</span>.”
         </div>
         <div className="wl-claim-meta">
           <span className="wl-tag wl-tag-confidence">
             <span className="wl-dot-green" />
             High confidence
           </span>
-          <span className="wl-tag">topic - Fed policy</span>
-          <span className="wl-tag">stance - directional</span>
+          <span className="wl-tag wl-tag-mono">Vision Pro review</span>
         </div>
       </div>
     </div>
@@ -205,7 +238,7 @@ function Thumb() {
       <svg className="wl-thumb-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
         <path d="M8 5v14l11-7z" />
       </svg>
-      <span className="wl-thumb-time">12:43</span>
+      <span className="wl-thumb-time">24:09</span>
     </div>
   )
 }
@@ -214,20 +247,26 @@ function EvidenceCard() {
   return (
     <div className="wl-card wl-layer wl-layer-evidence">
       <div className="wl-card-head">
-        <div className="wl-card-title">
-          <span className="wl-kicker">Evidence - jump to source</span>
-        </div>
+        <span className="wl-kicker">Source · jump to transcript</span>
+        <span className="wl-evidence-cite-num">[1]</span>
       </div>
       <div className="wl-evidence">
         <Thumb />
         <div className="wl-evidence-body">
-          <div className="wl-evidence-title">Why I am still long duration - March macro update</div>
+          <div className="wl-evidence-title">Apple Vision Pro Review: Magic, Until It&apos;s Not.</div>
           <div className="wl-evidence-meta">
-            <span>12:43</span>
-            <span>-</span>
-            <span>transcript line 184</span>
+            <span>@mkbhd</span>
+            <span>·</span>
+            <span>1mo ago</span>
+            <span>·</span>
+            <span className="wl-evidence-ts">▸ 12:08</span>
           </div>
         </div>
+      </div>
+      <div className="wl-evidence-transcript">
+        <span className="wl-evidence-transcript-pre">…forgives the software —</span>{' '}
+        <span className="wl-evidence-transcript-hl">a beautifully finished prototype, not a finished product</span>
+        <span className="wl-evidence-transcript-post">, and that gap is what most reviews…</span>
       </div>
     </div>
   )
@@ -282,7 +321,7 @@ export default function WaitlistPage(props: WaitlistPageProps) {
       setMessage("You're on the list. Your 1,000 minutes will be ready at launch.")
     } catch {
       setStatus('error')
-      setMessage('Could not reach Trace. Please try again.')
+      setMessage('Could not reach Sourcemax. Please try again.')
     }
   }
 
@@ -292,17 +331,26 @@ export default function WaitlistPage(props: WaitlistPageProps) {
 
       <main className="wl-page">
         <section className="wl-hero">
+          <img
+            className="wl-hero-mark fade-up d1"
+            src="/sourcemax_icon.png"
+            alt=""
+            aria-hidden
+          />
           <div className="wl-badge fade-up d1">
             <span className="wl-badge-dot" aria-hidden />
-            <span>1,000 free transcript minutes</span>
+            <span>1,000 free transcript minutes at launch</span>
           </div>
 
-          <h1 className="wl-headline fade-up d2">Join the Trace waitlist.</h1>
+          <h1 className="wl-headline fade-up d2">Join the Sourcemax waitlist.</h1>
 
-          <p className="wl-sub fade-up d3">Get 1,000 free transcript minutes when we launch.</p>
+          <p className="wl-sub fade-up d3">
+            Profile any YouTube channel — themes, claims, tone, evidence — with every line cited back to the exact timestamp.
+          </p>
 
           <p className="wl-supporting fade-up d3">
-            Profile YouTube creators with cited themes, claims, tone, and recurring ideas, built from the original videos.
+            Early access gets 1,000 transcript minutes free — roughly{' '}
+            <b>60 long-form videos</b> fully profiled, with no card on file.
           </p>
 
           <div className="fade-up d4">
@@ -314,11 +362,11 @@ export default function WaitlistPage(props: WaitlistPageProps) {
                 <div className="wl-success-body">
                   <div className="wl-success-title">You&apos;re on the list.</div>
                   <div className="wl-success-text">
-                    Your 1,000 minutes will be ready at launch. We&apos;ll email <b>{email || 'you'}</b> the day access opens.
+                    Your 1,000 minutes will be ready at launch. We&apos;ll email <b>{email || 'you'}</b> the moment your workspace opens — no other emails.
                   </div>
                   <span className="wl-success-tag">
                     <MailIcon size={11} />
-                    confirmation ready
+                    confirmation sent
                   </span>
                 </div>
               </div>
@@ -353,7 +401,7 @@ export default function WaitlistPage(props: WaitlistPageProps) {
                     {isLoading ? (
                       <>
                         <span className="wl-spinner" aria-hidden />
-                        <span>Joining...</span>
+                        <span>Joining…</span>
                       </>
                     ) : (
                       <>
@@ -373,7 +421,7 @@ export default function WaitlistPage(props: WaitlistPageProps) {
                   <div className="wl-form-meta">
                     <span>No spam.</span>
                     <span className="wl-meta-dot" aria-hidden />
-                    <span>One email at launch.</span>
+                    <span>One email when your workspace opens.</span>
                     <span className="wl-meta-dot" aria-hidden />
                     <span>Unsubscribe in one click.</span>
                   </div>
@@ -381,6 +429,8 @@ export default function WaitlistPage(props: WaitlistPageProps) {
               </>
             )}
           </div>
+
+          {!isSuccess && <Proof />}
         </section>
 
         <ProductPreview />

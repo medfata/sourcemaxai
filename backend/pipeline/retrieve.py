@@ -688,36 +688,66 @@ def _annotate_source_ids(sources: list[dict[str, Any]], *, limit: int) -> list[d
     return limited
 
 
-def retrieve_context(
+def _build_coverage(
+    index: dict[str, Any] | None,
+    intent: QueryIntent,
+    sources: list[dict[str, Any]],
+    scope: ChatScope | None,
+) -> dict[str, Any]:
+    if index is None:
+        return {
+            "mode": intent.mode,
+            "window_seconds": intent.seconds_window,
+            "total_selected_videos": 0,
+            "distinct_videos_returned": 0,
+            "chunks_returned": len(sources),
+            "missing_video_ids": [],
+        }
+
+    selected_chunks = _filter_retrievable_chunks(index, scope)
+    selected_video_ids = sorted(
+        {
+            chunk["video_id"]
+            for chunk in selected_chunks
+            if isinstance(chunk.get("video_id"), str)
+        }
+    )
+    returned_video_ids = {
+        source["video_id"]
+        for source in sources
+        if isinstance(source.get("video_id"), str)
+    }
+    structural = intent.mode in {"opening", "closing"}
+    missing = (
+        sorted(set(selected_video_ids) - returned_video_ids) if structural else []
+    )
+
+    return {
+        "mode": intent.mode,
+        "window_seconds": intent.seconds_window,
+        "total_selected_videos": len(selected_video_ids),
+        "distinct_videos_returned": len(returned_video_ids),
+        "chunks_returned": len(sources),
+        "missing_video_ids": missing,
+    }
+
+
+def _dispatch_retrieval(
     channel_id: str,
     query: str,
-    scope: ChatScope | None = None,
-    limit: int = 12,
-) -> list[dict]:
-    """Return caption chunks from data/channels/{channel_id}/chunk_index.json.
-
-    Intent-aware dispatch (see classify_query):
-    - opening / closing: structural pick of first/last chunk per video,
-      bypassing lexical scoring so position-based questions still return
-      the correct evidence when the query lacks topical keywords.
-    - lexical_global: lexical scoring with a widened limit so cross-video
-      synthesis questions ('every video', 'across all') can see more
-      videos at once.
-    - lexical (default): lexical scoring with the caller's limit.
-
-    Retrieval remains deterministic — no embeddings, no transcript refetch,
-    no chat-prompt mutation outside the returned sources.
-    """
+    scope: ChatScope | None,
+    limit: int,
+) -> tuple[list[dict[str, Any]], QueryIntent, dict[str, Any] | None]:
     if limit <= 0:
-        return []
+        return [], classify_query(query), None
 
     index = _load_current_chunk_index(channel_id)
     if index is None:
-        return []
+        return [], classify_query(query), None
 
     chunks = index.get("chunks")
     if not isinstance(chunks, list) or not chunks:
-        return []
+        return [], classify_query(query), index
 
     intent = classify_query(query)
 
@@ -725,17 +755,17 @@ def retrieve_context(
         window = intent.seconds_window or DEFAULT_OPENING_WINDOW_SECONDS
         opening_sources = _retrieve_openings(index, scope, window)
         target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
-        return _annotate_source_ids(opening_sources, limit=target_limit)
+        return _annotate_source_ids(opening_sources, limit=target_limit), intent, index
 
     if intent.mode == "closing":
         window = intent.seconds_window or DEFAULT_CLOSING_WINDOW_SECONDS
         closing_sources = _retrieve_closings(index, scope, window)
         target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
-        return _annotate_source_ids(closing_sources, limit=target_limit)
+        return _annotate_source_ids(closing_sources, limit=target_limit), intent, index
 
     tokens = _query_tokens(query)
     if not tokens:
-        return []
+        return [], intent, index
 
     effective_limit = limit
     if intent.mode == "lexical_global":
@@ -763,4 +793,46 @@ def retrieve_context(
         )
 
     scored_sources.sort(key=_sort_key)
-    return _annotate_source_ids(scored_sources, limit=effective_limit)
+    return _annotate_source_ids(scored_sources, limit=effective_limit), intent, index
+
+
+def retrieve_context(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None = None,
+    limit: int = 12,
+) -> list[dict]:
+    """Return caption chunks from data/channels/{channel_id}/chunk_index.json.
+
+    Intent-aware dispatch (see classify_query):
+    - opening / closing: structural pick of first/last chunk per video,
+      bypassing lexical scoring so position-based questions still return
+      the correct evidence when the query lacks topical keywords.
+    - lexical_global: lexical scoring with a widened limit so cross-video
+      synthesis questions ('every video', 'across all') can see more
+      videos at once.
+    - lexical (default): lexical scoring with the caller's limit.
+
+    Retrieval remains deterministic — no embeddings, no transcript refetch,
+    no chat-prompt mutation outside the returned sources.
+    """
+    sources, _, _ = _dispatch_retrieval(channel_id, query, scope, limit)
+    return sources
+
+
+def retrieve_with_coverage(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None = None,
+    limit: int = 12,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Same as retrieve_context but also returns coverage metadata.
+
+    Coverage tells the source-pack formatter how many videos were
+    available, how many made it into the returned chunks, and which
+    selected videos are missing — used by the chat prompt so the LLM
+    does not claim missing data when retrieval scope explains the gap.
+    """
+    sources, intent, index = _dispatch_retrieval(channel_id, query, scope, limit)
+    coverage = _build_coverage(index, intent, sources, scope)
+    return sources, coverage

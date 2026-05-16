@@ -8,7 +8,7 @@ from typing import Any
 
 from backend import storage
 from backend.models import ChatScope
-from backend.pipeline.retrieve import retrieve_context
+from backend.pipeline.retrieve import retrieve_with_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ CHAT_SYSTEM_PROMPT_TEMPLATE = """You answer questions about a YouTube channel us
 Rules:
 - Use VIDEO_DIGESTS for cross-video patterns and synthesis.
 - Use SOURCE_PACK for direct quotes and specific factual claims.
+- Trust the SOURCE_PACK coverage header. When coverage shows chunks from all selected videos for a structural question (openings, closings), the evidence is complete — do not claim missing data outside the listed missing_video_ids.
 - Cite source IDs like [S1] after supported clauses.
 - Do not cite source IDs that are not present in the SOURCE PACK.
 - If the SOURCE PACK does not contain enough evidence for a specific question, say there is not enough caption evidence.
@@ -321,15 +322,50 @@ def format_video_digests(digests: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def format_source_pack(sources: list[dict[str, Any]]) -> str:
+def _format_coverage_header(coverage: dict[str, Any] | None) -> str | None:
+    if not coverage:
+        return None
+    mode = coverage.get("mode") or "lexical"
+    chunks_returned = int(coverage.get("chunks_returned") or 0)
+    distinct = int(coverage.get("distinct_videos_returned") or 0)
+    total = int(coverage.get("total_selected_videos") or 0)
+    window = coverage.get("window_seconds")
+    detail = f"mode={mode}"
+    if window is not None:
+        detail = f"{detail}, window={window}s"
+    return (
+        f"coverage: {chunks_returned} chunks from {distinct} of {total} selected videos "
+        f"({detail})"
+    )
+
+
+def _format_missing_videos(coverage: dict[str, Any] | None) -> str | None:
+    if not coverage:
+        return None
+    mode = coverage.get("mode")
+    if mode not in {"opening", "closing"}:
+        return None
+    missing = coverage.get("missing_video_ids") or []
+    if not missing:
+        return None
+    label = "missing_openings" if mode == "opening" else "missing_closings"
+    return f"{label}: {', '.join(missing)}"
+
+
+def format_source_pack(
+    sources: list[dict[str, Any]],
+    coverage: dict[str, Any] | None = None,
+) -> str:
     """Format retrieved chunks as compact [S1]-style evidence for the model."""
     if not sources:
-        return (
+        body = (
             "(no retrieved caption sources)\n"
             "Evidence limitation: no relevant caption chunks were retrieved for this query. "
             "For specific factual questions, say there is not enough caption evidence in the "
             "source pack to answer."
         )
+        header = _format_coverage_header(coverage)
+        return f"{header}\n{body}" if header else body
 
     lines = []
     for index, source in enumerate(sources, start=1):
@@ -354,7 +390,11 @@ def format_source_pack(sources: list[dict[str, Any]]) -> str:
                 f"caption: \"{text}\"",
             ]
         )
-    return "\n".join(lines)
+    header = _format_coverage_header(coverage)
+    missing_line = _format_missing_videos(coverage)
+    prefix_parts = [part for part in (header, missing_line) if part]
+    body = "\n".join(lines)
+    return "\n".join([*prefix_parts, body]) if prefix_parts else body
 
 
 def build_chat_context(
@@ -377,8 +417,10 @@ def build_chat_context(
     latest_user_query = extract_latest_user_query(messages)
     digests = storage.load_summary_digests(channel_id)
     video_digests_text = format_video_digests(digests)
-    sources = retrieve_context(channel_id, latest_user_query, scope=scope, limit=retrieval_limit)
-    source_pack = format_source_pack(sources)
+    sources, coverage = retrieve_with_coverage(
+        channel_id, latest_user_query, scope=scope, limit=retrieval_limit
+    )
+    source_pack = format_source_pack(sources, coverage=coverage)
     system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
         channel_card=_channel_card(profile, scope),
         profile_hints=_profile_hints(profile),

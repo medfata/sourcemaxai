@@ -369,7 +369,10 @@ async def test_chat_sends_source_registry_before_deltas(client, temp_data_dir):
     mock_client.messages.stream = MagicMock(return_value=mock_stream)
 
     with (
-        patch("backend.pipeline.chat_context.retrieve_context", return_value=[_retrieved_source()]),
+        patch(
+            "backend.pipeline.chat_context.retrieve_with_coverage",
+            return_value=([_retrieved_source()], {}),
+        ),
         patch("backend.pipeline.ask.AsyncAnthropic", return_value=mock_client),
     ):
         resp = client.post(
@@ -430,7 +433,10 @@ async def test_chat_warns_about_unknown_registry_citations(client, temp_data_dir
     mock_client.messages.stream = MagicMock(return_value=mock_stream)
 
     with (
-        patch("backend.pipeline.chat_context.retrieve_context", return_value=[_retrieved_source()]),
+        patch(
+            "backend.pipeline.chat_context.retrieve_with_coverage",
+            return_value=([_retrieved_source()], {}),
+        ),
         patch("backend.pipeline.ask.AsyncAnthropic", return_value=mock_client),
     ):
         resp = client.post(
@@ -619,7 +625,10 @@ async def test_chat_persists_session_messages_and_sources(client, temp_data_dir)
     mock_client.messages.stream = MagicMock(return_value=mock_stream)
 
     with (
-        patch("backend.pipeline.chat_context.retrieve_context", return_value=[_retrieved_source()]),
+        patch(
+            "backend.pipeline.chat_context.retrieve_with_coverage",
+            return_value=([_retrieved_source()], {}),
+        ),
         patch("backend.pipeline.ask.AsyncAnthropic", return_value=mock_client),
     ):
         resp = client.post(

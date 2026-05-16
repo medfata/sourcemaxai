@@ -184,3 +184,47 @@ def test_scope_is_passed_into_retrieve_context(chat_context_env):
     assert mock_retrieve.call_args.args[:2] == (channel_id, "What changed recently?")
     assert mock_retrieve.call_args.kwargs["scope"] is scope
     assert mock_retrieve.call_args.kwargs["limit"] == chat_context.SOURCE_LIMIT
+
+
+def test_video_digests_appear_in_system_prompt_under_token_budget(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    import importlib
+
+    from backend.pipeline import chat_context as fresh_chat_context
+
+    importlib.reload(fresh_chat_context)
+
+    context = fresh_chat_context.build_chat_context(
+        fixture.channel_id,
+        [{"role": "user", "content": "summarize the channel"}],
+    )
+
+    assert context.error is None
+    assert "VIDEO_DIGESTS:" in context.system_prompt
+    for spec_video_id in ("vid_0", "vid_1", "vid_2", "vid_3", "vid_4"):
+        assert f"video_id={spec_video_id}" in context.system_prompt
+
+    approx_token_budget = 120_000
+    approx_tokens = len(context.system_prompt) // 4
+    assert approx_tokens < approx_token_budget, (
+        f"system prompt {approx_tokens} tokens exceeds {approx_token_budget} budget"
+    )
+
+
+def test_opening_query_source_pack_covers_all_videos(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    import importlib
+
+    from backend.pipeline import chat_context as fresh_chat_context
+
+    importlib.reload(fresh_chat_context)
+
+    context = fresh_chat_context.build_chat_context(
+        fixture.channel_id,
+        [{"role": "user", "content": "what is the hook in the first 10 seconds of every video"}],
+    )
+
+    assert context.error is None
+    assert len({source["video_id"] for source in context.sources}) == 5
+    assert "coverage: 5 chunks from 5 of 5 selected videos" in context.system_prompt
+    assert "mode=opening" in context.system_prompt

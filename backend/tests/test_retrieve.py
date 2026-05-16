@@ -400,3 +400,86 @@ def test_classify_query_empty_and_none_safe() -> None:
         intent = classify_query(query)
         assert intent.mode == "lexical"
         assert intent.seconds_window is None
+
+
+def test_opening_mode_returns_first_chunk_per_video(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "what is the hook in the first 10 seconds of every video",
+        limit=12,
+    )
+
+    assert len(results) == 5
+    assert len({source["video_id"] for source in results}) == 5
+    assert all(source["start_seconds"] <= 10 for source in results)
+    assert all(source["score"] == 1.0 for source in results)
+    upload_dates = [source["upload_date"] for source in results]
+    assert upload_dates == sorted(upload_dates), "expected upload_date ascending order"
+
+
+def test_opening_mode_respects_seconds_window(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "first 1 seconds of every video",
+        limit=12,
+    )
+
+    assert {source["video_id"] for source in results} <= {"vid_0", "vid_1", "vid_2"}
+    assert all(source["start_seconds"] <= 1 for source in results)
+
+
+def test_closing_mode_returns_last_chunk_per_video(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "how do videos end across every video",
+        limit=12,
+    )
+
+    assert len(results) == 5
+    assert len({source["video_id"] for source in results}) == 5
+    for source in results:
+        per_video_max_end = max(
+            chunk["end_seconds"]
+            for chunk in fixture.chunk_index["chunks"]
+            if chunk["video_id"] == source["video_id"]
+        )
+        assert source["end_seconds"] == per_video_max_end
+
+
+def test_lexical_global_bumps_limit_beyond_caller_value(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    global_results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "money across every video",
+        limit=1,
+    )
+    plain_results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "money",
+        limit=1,
+    )
+
+    assert len(global_results) > len(plain_results), (
+        "lexical_global limit should widen beyond caller's limit=1"
+    )
+    assert len({source["video_id"] for source in global_results}) >= 2
+
+
+def test_structural_modes_respect_date_scope(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    scope = ChatScope(date_from="20250301")
+
+    results = fixture.retrieve.retrieve_context(
+        fixture.channel_id,
+        "hook in the first 10 seconds of every video",
+        scope=scope,
+        limit=12,
+    )
+
+    returned_dates = {source["upload_date"] for source in results}
+    assert returned_dates, "expected at least one structural pick after date filter"
+    assert all(date >= "20250301" for date in returned_dates)
+    assert {source["video_id"] for source in results} == {"vid_2", "vid_3", "vid_4"}

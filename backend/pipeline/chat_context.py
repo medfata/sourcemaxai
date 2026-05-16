@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from backend import storage
 from backend.models import ChatScope
 from backend.pipeline.retrieve import retrieve_context
+
+logger = logging.getLogger(__name__)
 
 SOURCE_LIMIT = 12
 SOURCE_TEXT_MAX_CHARS = 700
@@ -16,16 +19,19 @@ HISTORY_MESSAGE_LIMIT = 8
 HISTORY_CHAR_BUDGET = 5000
 HISTORY_MESSAGE_MAX_CHARS = 1600
 PROFILE_HINT_LIMIT = 8
+DIGEST_TITLE_MAX_CHARS = 140
+DIGEST_THEME_LIMIT = 6
 
 CHAT_SYSTEM_PROMPT_TEMPLATE = """You answer questions about a YouTube channel using provided caption sources.
 
 Rules:
-- Use the SOURCE PACK for specific factual claims.
+- Use VIDEO_DIGESTS for cross-video patterns and synthesis.
+- Use SOURCE_PACK for direct quotes and specific factual claims.
 - Cite source IDs like [S1] after supported clauses.
 - Do not cite source IDs that are not present in the SOURCE PACK.
 - If the SOURCE PACK does not contain enough evidence for a specific question, say there is not enough caption evidence.
 - Do not treat profile hints as caption evidence.
-- Broad synthesis may use profile hints and representative sources when available; describe it as "across the channel".
+- Broad synthesis may use profile hints, VIDEO_DIGESTS, and representative sources when available; describe it as "across the channel".
 - Cut filler: no preambles, no recaps of the question, and no closing summaries that restate the answer.
 - Distinguish recurring patterns from one-off claims when it matters.
 
@@ -50,6 +56,9 @@ CHANNEL CARD:
 
 PROFILE HINTS:
 {profile_hints}
+
+VIDEO_DIGESTS:
+{video_digests}
 
 LATEST USER QUESTION:
 {latest_user_query}
@@ -280,6 +289,38 @@ def _format_seconds_range(source: dict[str, Any]) -> str:
     return f"{start}-{end}"
 
 
+def format_video_digests(digests: list[dict[str, Any]]) -> str:
+    """Format per-video summary digests as compact [V1]-style entries."""
+    if not digests:
+        return "(no per-video summaries available)"
+
+    lines: list[str] = []
+    for index, digest in enumerate(digests, start=1):
+        digest_id = f"V{index}"
+        video_id = str(digest.get("video_id") or "unknown")
+        upload_date = str(digest.get("upload_date") or "unknown")
+        title = _compact_text(digest.get("title"), DIGEST_TITLE_MAX_CHARS)
+
+        themes = digest.get("themes")
+        if isinstance(themes, list) and themes:
+            theme_text = ", ".join(str(theme) for theme in themes[:DIGEST_THEME_LIMIT])
+        else:
+            theme_text = "none"
+
+        summary_text = _compact_text(digest.get("summary_text"), storage.SUMMARY_DIGEST_MAX_CHARS)
+        if not summary_text:
+            summary_text = "(no summary text)"
+
+        lines.extend(
+            [
+                f"[{digest_id}] video_id={video_id} date={upload_date} title=\"{title}\"",
+                f"themes: {theme_text}",
+                f"summary: {summary_text}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_source_pack(sources: list[dict[str, Any]]) -> str:
     """Format retrieved chunks as compact [S1]-style evidence for the model."""
     if not sources:
@@ -334,13 +375,31 @@ def build_chat_context(
         scope = None
 
     latest_user_query = extract_latest_user_query(messages)
+    digests = storage.load_summary_digests(channel_id)
+    video_digests_text = format_video_digests(digests)
     sources = retrieve_context(channel_id, latest_user_query, scope=scope, limit=retrieval_limit)
     source_pack = format_source_pack(sources)
     system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
         channel_card=_channel_card(profile, scope),
         profile_hints=_profile_hints(profile),
+        video_digests=video_digests_text,
         latest_user_query=latest_user_query or "(none)",
         source_pack=source_pack,
+    )
+
+    logger.info(
+        "chat_context_built",
+        extra={
+            "channel_id": channel_id,
+            "digest_count": len(digests),
+            "digest_chars": len(video_digests_text),
+            "digest_token_estimate": len(video_digests_text) // 4,
+            "source_count": len(sources),
+            "source_pack_chars": len(source_pack),
+            "source_pack_token_estimate": len(source_pack) // 4,
+            "system_prompt_chars": len(system_prompt),
+            "system_prompt_token_estimate": len(system_prompt) // 4,
+        },
     )
 
     return ChatContext(

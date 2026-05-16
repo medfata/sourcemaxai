@@ -28,6 +28,7 @@ CHANNEL_ARTIFACTS_BUCKET = "channel-artifacts"
 DEFAULT_RUN_ID = "manual"
 DEFAULT_CHAT_SESSION_TITLE = "New chat"
 WAITLIST_TRANSCRIPT_MINUTES = 1000
+SUMMARY_DIGEST_MAX_CHARS = 4000
 _CURRENT_OWNER_ID: ContextVar[str | None] = ContextVar("storage_owner_id", default=None)
 _CURRENT_RUN_ID: ContextVar[str | None] = ContextVar("storage_run_id", default=None)
 _WAITLIST_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -1922,6 +1923,93 @@ def load_profile(channel_id: str, *, owner_id: str | None = None) -> dict[str, A
     """Load the latest profile through the local or owner-aware backend."""
     owner = _effective_owner_id(owner_id)
     return _backend_for_owner(owner).load_profile(owner or LOCAL_OWNER_ID, channel_id)
+
+
+def _digest_from_summary(summary: dict[str, Any], *, max_chars: int) -> dict[str, Any] | None:
+    video_id = summary.get("video_id")
+    if not isinstance(video_id, str) or not video_id:
+        return None
+
+    title = str(summary.get("title") or "")
+    upload_date = str(summary.get("upload_date") or "")
+    core_topic = str(summary.get("core_topic") or "").strip()
+
+    claim_texts: list[str] = []
+    raw_claims = summary.get("key_claims")
+    if isinstance(raw_claims, list):
+        for claim in raw_claims:
+            if not isinstance(claim, dict):
+                continue
+            text = claim.get("text")
+            if isinstance(text, str) and text.strip():
+                claim_texts.append(text.strip())
+
+    themes: list[str] = []
+    raw_themes = summary.get("recurring_themes")
+    if isinstance(raw_themes, list):
+        themes = [theme for theme in raw_themes if isinstance(theme, str) and theme]
+
+    parts: list[str] = []
+    if core_topic:
+        parts.append(core_topic.rstrip("."))
+    if claim_texts:
+        parts.append("Claims: " + "; ".join(claim_texts))
+    summary_text = ". ".join(parts).strip()
+
+    if max_chars > 0 and len(summary_text) > max_chars:
+        truncated = summary_text[: max_chars - 1]
+        space = truncated.rfind(" ")
+        if space > 0:
+            truncated = truncated[:space]
+        summary_text = truncated + "…"
+
+    return {
+        "video_id": video_id,
+        "title": title,
+        "upload_date": upload_date,
+        "summary_text": summary_text,
+        "key_claims": claim_texts[:5],
+        "themes": themes[:6],
+    }
+
+
+def load_summary_digests(
+    channel_id: str,
+    *,
+    owner_id: str | None = None,
+    max_chars: int = SUMMARY_DIGEST_MAX_CHARS,
+) -> list[dict[str, Any]]:
+    """Compact per-video summary digests for chat-context assembly.
+
+    Uses the channel profile as the canonical video list and pulls each
+    summary through the configured backend so digests work for both local
+    FS and Supabase. Sorted by upload_date ascending then video_id for a
+    stable order in the system prompt.
+    """
+    profile = load_profile(channel_id, owner_id=owner_id)
+    if not isinstance(profile, dict):
+        return []
+    videos = profile.get("videos")
+    if not isinstance(videos, list):
+        return []
+
+    digests: list[dict[str, Any]] = []
+    for video in videos:
+        if not isinstance(video, dict):
+            continue
+        video_id = video.get("video_id")
+        if not isinstance(video_id, str) or not video_id:
+            continue
+        summary = load_summary(channel_id, video_id, owner_id=owner_id)
+        if not isinstance(summary, dict):
+            continue
+        digest = _digest_from_summary(summary, max_chars=max_chars)
+        if digest is None:
+            continue
+        digests.append(digest)
+
+    digests.sort(key=lambda d: (d.get("upload_date", ""), d.get("video_id", "")))
+    return digests
 
 
 def save_profile(

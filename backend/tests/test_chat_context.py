@@ -77,7 +77,7 @@ def test_context_builder_includes_channel_card_and_profile_hints(chat_context_en
     channel_id = "UC_context"
     _write_profile(storage, channel_id)
 
-    with patch.object(chat_context, "retrieve_context", return_value=[]):
+    with patch.object(chat_context, "retrieve_with_coverage", return_value=([], {})):
         context = chat_context.build_chat_context(
             channel_id,
             [{"role": "user", "content": "What is this channel about?"}],
@@ -99,7 +99,7 @@ def test_source_pack_includes_retrieved_chunks_and_source_ids(chat_context_env):
     channel_id = "UC_sources"
     _write_profile(storage, channel_id)
 
-    with patch.object(chat_context, "retrieve_context", return_value=[_source("S1")]):
+    with patch.object(chat_context, "retrieve_with_coverage", return_value=([_source("S1")], {})):
         context = chat_context.build_chat_context(
             channel_id,
             [{"role": "user", "content": "Explain compounding evidence"}],
@@ -131,7 +131,7 @@ def test_empty_retrieval_adds_insufficient_caption_evidence_context(chat_context
     channel_id = "UC_empty_retrieval"
     _write_profile(storage, channel_id)
 
-    with patch.object(chat_context, "retrieve_context", return_value=[]):
+    with patch.object(chat_context, "retrieve_with_coverage", return_value=([], {})):
         context = chat_context.build_chat_context(
             channel_id,
             [{"role": "user", "content": "What did they say about an obscure topic?"}],
@@ -153,7 +153,7 @@ def test_only_recent_conversation_history_is_included(chat_context_env):
     messages.append({"role": "assistant", "content": "latest assistant"})
     messages.append({"role": "user", "content": "latest user query"})
 
-    with patch.object(chat_context, "retrieve_context", return_value=[_source("S1")]):
+    with patch.object(chat_context, "retrieve_with_coverage", return_value=([_source("S1")], {})):
         context = chat_context.build_chat_context(channel_id, messages)
 
     history_text = "\n".join(message["content"] for message in context.messages)
@@ -171,7 +171,9 @@ def test_scope_is_passed_into_retrieve_context(chat_context_env):
     _write_profile(storage, channel_id)
     scope = ChatScope(date_from="20231201", themes=["ML"])
 
-    with patch.object(chat_context, "retrieve_context", return_value=[]) as mock_retrieve:
+    with patch.object(
+        chat_context, "retrieve_with_coverage", return_value=([], {})
+    ) as mock_retrieve:
         chat_context.build_chat_context(
             channel_id,
             [{"role": "user", "content": "What changed recently?"}],
@@ -182,3 +184,47 @@ def test_scope_is_passed_into_retrieve_context(chat_context_env):
     assert mock_retrieve.call_args.args[:2] == (channel_id, "What changed recently?")
     assert mock_retrieve.call_args.kwargs["scope"] is scope
     assert mock_retrieve.call_args.kwargs["limit"] == chat_context.SOURCE_LIMIT
+
+
+def test_video_digests_appear_in_system_prompt_under_token_budget(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    import importlib
+
+    from backend.pipeline import chat_context as fresh_chat_context
+
+    importlib.reload(fresh_chat_context)
+
+    context = fresh_chat_context.build_chat_context(
+        fixture.channel_id,
+        [{"role": "user", "content": "summarize the channel"}],
+    )
+
+    assert context.error is None
+    assert "VIDEO_DIGESTS:" in context.system_prompt
+    for spec_video_id in ("vid_0", "vid_1", "vid_2", "vid_3", "vid_4"):
+        assert f"video_id={spec_video_id}" in context.system_prompt
+
+    approx_token_budget = 120_000
+    approx_tokens = len(context.system_prompt) // 4
+    assert approx_tokens < approx_token_budget, (
+        f"system prompt {approx_tokens} tokens exceeds {approx_token_budget} budget"
+    )
+
+
+def test_opening_query_source_pack_covers_all_videos(synthetic_chunk_index):
+    fixture = synthetic_chunk_index
+    import importlib
+
+    from backend.pipeline import chat_context as fresh_chat_context
+
+    importlib.reload(fresh_chat_context)
+
+    context = fresh_chat_context.build_chat_context(
+        fixture.channel_id,
+        [{"role": "user", "content": "what is the hook in the first 10 seconds of every video"}],
+    )
+
+    assert context.error is None
+    assert len({source["video_id"] for source in context.sources}) == 5
+    assert "coverage: 5 chunks from 5 of 5 selected videos" in context.system_prompt
+    assert "mode=opening" in context.system_prompt

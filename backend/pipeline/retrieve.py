@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from backend import storage
 from backend.models import ChatScope
@@ -12,6 +13,171 @@ from backend.pipeline.schema_versions import get_chunk_index_stale_reasons
 
 TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 QUOTE_MAX_CHARS = 220
+STRUCTURAL_PER_VIDEO_LIMIT = 1
+STRUCTURAL_HARD_LIMIT = 100
+LEXICAL_GLOBAL_HARD_LIMIT = 60
+
+QueryMode = Literal["lexical", "opening", "closing", "lexical_global"]
+
+DEFAULT_OPENING_WINDOW_SECONDS = 30
+DEFAULT_CLOSING_WINDOW_SECONDS = 60
+
+
+# Substring patterns drive intent classification. The lists below are the
+# authoritative rule set (R2.2); keep them in sync with PLAN_RAG_CHAT.md.
+#
+# Opening-mode triggers (any one is sufficient):
+#   - "hook"               structural noun used in YouTube parlance
+#   - "intro"              short for introduction
+#   - "outset"             unambiguous opening phrase
+#   - "start of"           phrase form anchors the bare verb "start"
+#   - "first N seconds"    regex below picks up a numeric window
+#   - "how do videos start", "how does ... begin", "begin with",
+#     "how does it begin", "begin the video", "kick(s|ing) off"
+#   The bare verbs "start", "begin", "open" are NOT triggers on their own
+#   (false positive risk: "I want to start using Feastables").
+_OPENING_SUBSTRINGS: tuple[str, ...] = (
+    "hook",
+    "intro",
+    "outset",
+    "start of",
+    "how do videos start",
+    "how do the videos start",
+    "how do his videos start",
+    "how do her videos start",
+    "how do they start",
+    "begin with",
+    "how does it begin",
+    "how does the video begin",
+    "how does each video begin",
+    "how does every video begin",
+    "begin the video",
+    "kick off",
+    "kicks off",
+    "kicking off",
+)
+
+# Closing-mode triggers:
+#   - "outro"
+#   - "closing"
+#   - "end of"
+#   - "last N seconds"      regex below picks up the numeric window
+#   - "how do videos end", "how does ... end", "end the video",
+#     "wrap up", "wraps up", "wrapping up", "sign off", "signs off"
+_CLOSING_SUBSTRINGS: tuple[str, ...] = (
+    "outro",
+    "closing",
+    "end of",
+    "videos end",
+    "video ends",
+    "videos typically end",
+    "how do videos end",
+    "how do the videos end",
+    "how do his videos end",
+    "how do her videos end",
+    "how do they end",
+    "how does it end",
+    "how does the video end",
+    "how does each video end",
+    "how does every video end",
+    "end the video",
+    "wrap up",
+    "wraps up",
+    "wrapping up",
+    "sign off",
+    "signs off",
+)
+
+# Cross-video / "global" phrasing. When present and no structural keyword
+# fires, we return lexical_global so the dispatcher (Wave 2) can widen the
+# chunk budget for cross-video synthesis.
+_GLOBAL_SUBSTRINGS: tuple[str, ...] = (
+    "every video",
+    "every episode",
+    "across all",
+    "across every",
+    "each video",
+    "each episode",
+    "all 50",
+    "all of the videos",
+    "in all the videos",
+    "in all videos",
+)
+
+_OPENING_NUMERIC_RE = re.compile(
+    r"first\s+(\d{1,3})\s*(?:s\b|sec\b|secs\b|second\b|seconds\b)",
+    re.IGNORECASE,
+)
+_CLOSING_NUMERIC_RE = re.compile(
+    r"last\s+(\d{1,3})\s*(?:s\b|sec\b|secs\b|second\b|seconds\b)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class QueryIntent:
+    mode: QueryMode
+    seconds_window: int | None
+
+
+def _extract_window(query_lc: str, pattern: re.Pattern[str]) -> int | None:
+    match = pattern.search(query_lc)
+    if match is None:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def classify_query(query: str) -> QueryIntent:
+    """Classify a chat query into a retrieval intent.
+
+    Returns a `QueryIntent` describing how the dispatcher (Wave 2) should
+    pull chunks. Structural modes (`opening`, `closing`) bypass lexical
+    scoring; `lexical_global` keeps lexical scoring but signals the caller
+    to widen the chunk budget for cross-video synthesis.
+    """
+    if not query or not isinstance(query, str):
+        return QueryIntent(mode="lexical", seconds_window=None)
+
+    query_lc = query.casefold()
+
+    opening_window = _extract_window(query_lc, _OPENING_NUMERIC_RE)
+    closing_window = _extract_window(query_lc, _CLOSING_NUMERIC_RE)
+
+    opening_match = opening_window is not None or any(
+        token in query_lc for token in _OPENING_SUBSTRINGS
+    )
+    closing_match = closing_window is not None or any(
+        token in query_lc for token in _CLOSING_SUBSTRINGS
+    )
+
+    if opening_match and not closing_match:
+        window = opening_window if opening_window is not None else DEFAULT_OPENING_WINDOW_SECONDS
+        return QueryIntent(mode="opening", seconds_window=window)
+
+    if closing_match and not opening_match:
+        window = closing_window if closing_window is not None else DEFAULT_CLOSING_WINDOW_SECONDS
+        return QueryIntent(mode="closing", seconds_window=window)
+
+    if opening_match and closing_match:
+        if opening_window is not None and closing_window is None:
+            return QueryIntent(mode="opening", seconds_window=opening_window)
+        if closing_window is not None and opening_window is None:
+            return QueryIntent(mode="closing", seconds_window=closing_window)
+        return QueryIntent(
+            mode="opening",
+            seconds_window=opening_window or DEFAULT_OPENING_WINDOW_SECONDS,
+        )
+
+    if any(token in query_lc for token in _GLOBAL_SUBSTRINGS):
+        return QueryIntent(mode="lexical_global", seconds_window=None)
+
+    return QueryIntent(mode="lexical", seconds_window=None)
 
 STOP_WORDS = {
     "a",
@@ -397,37 +563,16 @@ def _sort_key(source: dict[str, Any]) -> tuple[float, str, str, float, str]:
     )
 
 
-def retrieve_context(
-    channel_id: str,
-    query: str,
-    scope: ChatScope | None = None,
-    limit: int = 12,
-) -> list[dict]:
-    """Return ranked caption chunks from data/channels/{channel_id}/chunk_index.json.
-
-    The retrieval backend is intentionally lexical and deterministic. It does
-    not refetch transcripts, read raw transcript files, build embeddings, or
-    mutate the chat prompt/citation pipeline.
-    """
-    if limit <= 0:
-        return []
-
-    tokens = _query_tokens(query)
-    if not tokens:
-        return []
-
-    index = _load_current_chunk_index(channel_id)
-    if index is None:
-        return []
-
+def _filter_retrievable_chunks(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+) -> list[dict[str, Any]]:
     chunks = index.get("chunks")
-    if not isinstance(chunks, list) or not chunks:
+    if not isinstance(chunks, list):
         return []
-
-    scored_sources = []
-    seen_chunk_ids = set()
     indexed_video_ids = _indexed_video_ids(index)
-
+    filtered: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
     for chunk in chunks:
         if not _is_retrievable_chunk(chunk):
             continue
@@ -439,16 +584,206 @@ def retrieve_context(
         seen_chunk_ids.add(chunk_id)
         if not _matches_scope(chunk, scope):
             continue
+        filtered.append(chunk)
+    return filtered
 
+
+def _video_count(index: dict[str, Any]) -> int:
+    selected = _indexed_video_ids(index)
+    if selected:
+        return len(selected)
+    chunks = index.get("chunks")
+    if not isinstance(chunks, list):
+        return 0
+    return len(
+        {
+            chunk["video_id"]
+            for chunk in chunks
+            if isinstance(chunk, dict) and isinstance(chunk.get("video_id"), str)
+        }
+    )
+
+
+def _structural_sort_key(source: dict[str, Any]) -> tuple[str, str, float, str]:
+    return (
+        str(source.get("upload_date") or ""),
+        str(source.get("video_id") or ""),
+        float(source.get("start_seconds") or 0),
+        str(source.get("chunk_id") or ""),
+    )
+
+
+def _build_structural_source(chunk: dict[str, Any]) -> dict[str, Any]:
+    text = chunk["text"]
+    compact = " ".join(text.split())
+    return {
+        "kind": "chunk",
+        "chunk_id": chunk["chunk_id"],
+        "video_id": chunk["video_id"],
+        "title": str(chunk.get("title") or ""),
+        "upload_date": str(chunk.get("upload_date") or ""),
+        "start_seconds": chunk["start_seconds"],
+        "end_seconds": chunk["end_seconds"],
+        "quote": _beginning_quote(compact) if compact else "",
+        "text": text,
+        "score": 1.0,
+    }
+
+
+def _retrieve_openings(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+    seconds_window: int,
+    per_video_limit: int = STRUCTURAL_PER_VIDEO_LIMIT,
+) -> list[dict[str, Any]]:
+    by_video: dict[str, list[dict[str, Any]]] = {}
+    for chunk in _filter_retrievable_chunks(index, scope):
+        if float(chunk.get("start_seconds") or 0) > seconds_window:
+            continue
+        by_video.setdefault(chunk["video_id"], []).append(chunk)
+
+    sources: list[dict[str, Any]] = []
+    for video_chunks in by_video.values():
+        video_chunks.sort(
+            key=lambda c: (float(c.get("start_seconds") or 0), str(c.get("chunk_id") or ""))
+        )
+        for chunk in video_chunks[:per_video_limit]:
+            sources.append(_build_structural_source(chunk))
+    sources.sort(key=_structural_sort_key)
+    return sources
+
+
+def _retrieve_closings(
+    index: dict[str, Any],
+    scope: ChatScope | None,
+    seconds_window: int,
+    per_video_limit: int = STRUCTURAL_PER_VIDEO_LIMIT,
+) -> list[dict[str, Any]]:
+    by_video: dict[str, list[dict[str, Any]]] = {}
+    for chunk in _filter_retrievable_chunks(index, scope):
+        by_video.setdefault(chunk["video_id"], []).append(chunk)
+
+    sources: list[dict[str, Any]] = []
+    for video_chunks in by_video.values():
+        proxy_end = max(float(c.get("end_seconds") or 0) for c in video_chunks)
+        threshold = proxy_end - seconds_window
+        candidates = [
+            c for c in video_chunks if float(c.get("end_seconds") or 0) >= threshold
+        ]
+        if not candidates:
+            candidates = list(video_chunks)
+        candidates.sort(
+            key=lambda c: (
+                -float(c.get("start_seconds") or 0),
+                str(c.get("chunk_id") or ""),
+            )
+        )
+        for chunk in candidates[:per_video_limit]:
+            sources.append(_build_structural_source(chunk))
+    sources.sort(key=_structural_sort_key)
+    return sources
+
+
+def _annotate_source_ids(sources: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    limited = sources[:limit] if limit > 0 else []
+    for position, source in enumerate(limited, start=1):
+        source["source_id"] = f"S{position}"
+    return limited
+
+
+def _build_coverage(
+    index: dict[str, Any] | None,
+    intent: QueryIntent,
+    sources: list[dict[str, Any]],
+    scope: ChatScope | None,
+) -> dict[str, Any]:
+    if index is None:
+        return {
+            "mode": intent.mode,
+            "window_seconds": intent.seconds_window,
+            "total_selected_videos": 0,
+            "distinct_videos_returned": 0,
+            "chunks_returned": len(sources),
+            "missing_video_ids": [],
+        }
+
+    selected_chunks = _filter_retrievable_chunks(index, scope)
+    selected_video_ids = sorted(
+        {
+            chunk["video_id"]
+            for chunk in selected_chunks
+            if isinstance(chunk.get("video_id"), str)
+        }
+    )
+    returned_video_ids = {
+        source["video_id"]
+        for source in sources
+        if isinstance(source.get("video_id"), str)
+    }
+    structural = intent.mode in {"opening", "closing"}
+    missing = (
+        sorted(set(selected_video_ids) - returned_video_ids) if structural else []
+    )
+
+    return {
+        "mode": intent.mode,
+        "window_seconds": intent.seconds_window,
+        "total_selected_videos": len(selected_video_ids),
+        "distinct_videos_returned": len(returned_video_ids),
+        "chunks_returned": len(sources),
+        "missing_video_ids": missing,
+    }
+
+
+def _dispatch_retrieval(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None,
+    limit: int,
+) -> tuple[list[dict[str, Any]], QueryIntent, dict[str, Any] | None]:
+    if limit <= 0:
+        return [], classify_query(query), None
+
+    index = _load_current_chunk_index(channel_id)
+    if index is None:
+        return [], classify_query(query), None
+
+    chunks = index.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        return [], classify_query(query), index
+
+    intent = classify_query(query)
+
+    if intent.mode == "opening":
+        window = intent.seconds_window or DEFAULT_OPENING_WINDOW_SECONDS
+        opening_sources = _retrieve_openings(index, scope, window)
+        target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
+        return _annotate_source_ids(opening_sources, limit=target_limit), intent, index
+
+    if intent.mode == "closing":
+        window = intent.seconds_window or DEFAULT_CLOSING_WINDOW_SECONDS
+        closing_sources = _retrieve_closings(index, scope, window)
+        target_limit = min(max(limit, _video_count(index)), STRUCTURAL_HARD_LIMIT)
+        return _annotate_source_ids(closing_sources, limit=target_limit), intent, index
+
+    tokens = _query_tokens(query)
+    if not tokens:
+        return [], intent, index
+
+    effective_limit = limit
+    if intent.mode == "lexical_global":
+        effective_limit = min(max(limit, 2 * _video_count(index)), LEXICAL_GLOBAL_HARD_LIMIT)
+
+    scored_sources: list[dict[str, Any]] = []
+    for chunk in _filter_retrievable_chunks(index, scope):
         score = _score_chunk(chunk, tokens)
         if score <= 0:
             continue
-
         text = chunk["text"]
         scored_sources.append(
             {
                 "kind": "chunk",
-                "chunk_id": chunk_id,
+                "chunk_id": chunk["chunk_id"],
                 "video_id": chunk["video_id"],
                 "title": str(chunk.get("title") or ""),
                 "upload_date": str(chunk.get("upload_date") or ""),
@@ -461,7 +796,46 @@ def retrieve_context(
         )
 
     scored_sources.sort(key=_sort_key)
-    limited_sources = scored_sources[:limit]
-    for index, source in enumerate(limited_sources, start=1):
-        source["source_id"] = f"S{index}"
-    return limited_sources
+    return _annotate_source_ids(scored_sources, limit=effective_limit), intent, index
+
+
+def retrieve_context(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None = None,
+    limit: int = 12,
+) -> list[dict]:
+    """Return caption chunks from data/channels/{channel_id}/chunk_index.json.
+
+    Intent-aware dispatch (see classify_query):
+    - opening / closing: structural pick of first/last chunk per video,
+      bypassing lexical scoring so position-based questions still return
+      the correct evidence when the query lacks topical keywords.
+    - lexical_global: lexical scoring with a widened limit so cross-video
+      synthesis questions ('every video', 'across all') can see more
+      videos at once.
+    - lexical (default): lexical scoring with the caller's limit.
+
+    Retrieval remains deterministic — no embeddings, no transcript refetch,
+    no chat-prompt mutation outside the returned sources.
+    """
+    sources, _, _ = _dispatch_retrieval(channel_id, query, scope, limit)
+    return sources
+
+
+def retrieve_with_coverage(
+    channel_id: str,
+    query: str,
+    scope: ChatScope | None = None,
+    limit: int = 12,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Same as retrieve_context but also returns coverage metadata.
+
+    Coverage tells the source-pack formatter how many videos were
+    available, how many made it into the returned chunks, and which
+    selected videos are missing — used by the chat prompt so the LLM
+    does not claim missing data when retrieval scope explains the gap.
+    """
+    sources, intent, index = _dispatch_retrieval(channel_id, query, scope, limit)
+    coverage = _build_coverage(index, intent, sources, scope)
+    return sources, coverage

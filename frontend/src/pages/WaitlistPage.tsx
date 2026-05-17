@@ -4,13 +4,6 @@ import { useRef, useState } from 'react'
 import { api } from '../api'
 import './WaitlistPage.css'
 
-interface WaitlistPageProps {
-  signedIn: boolean
-  onBackHome: () => void
-  onLogin: () => void
-  onOpenChannels: () => void
-}
-
 type SubmitState = 'idle' | 'loading' | 'success' | 'error'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -78,27 +71,19 @@ function AlertIcon() {
   )
 }
 
-function TraceMark({ onBackHome }: { onBackHome: () => void }) {
+function TraceMark() {
   return (
-    <button type="button" className="wl-brand" onClick={onBackHome} aria-label="Sourcemax home">
+    <div className="wl-brand" aria-label="Sourcemax">
       <img className="wl-brand-mark" src="/sourcemax_icon.png" alt="" aria-hidden />
       <span>Sourcemax</span>
-    </button>
+    </div>
   )
 }
 
-function Nav({ signedIn, onBackHome, onLogin, onOpenChannels }: WaitlistPageProps) {
+function Nav() {
   return (
     <nav className="wl-nav">
-      <TraceMark onBackHome={onBackHome} />
-      <div className="wl-nav-actions">
-        <button type="button" className="wl-nav-link" onClick={onBackHome}>
-          Back to Sourcemax
-        </button>
-        <button type="button" className="wl-nav-link wl-nav-link-strong" onClick={signedIn ? onOpenChannels : onLogin}>
-          {signedIn ? 'Open app' : 'Sign in'}
-        </button>
-      </div>
+      <TraceMark />
     </nav>
   )
 }
@@ -284,7 +269,7 @@ function ProductPreview() {
   )
 }
 
-export default function WaitlistPage(props: WaitlistPageProps) {
+export default function WaitlistPage() {
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<SubmitState>('idle')
   const [message, setMessage] = useState('')
@@ -327,7 +312,7 @@ export default function WaitlistPage(props: WaitlistPageProps) {
 
   return (
     <div className="waitlist-page">
-      <Nav {...props} />
+      <Nav />
 
       <main className="wl-page">
         <section className="wl-hero">
@@ -342,7 +327,10 @@ export default function WaitlistPage(props: WaitlistPageProps) {
             <span>1,000 free transcript minutes at launch</span>
           </div>
 
-          <h1 className="wl-headline fade-up d2">Join the Sourcemax waitlist.</h1>
+          <h1 className="wl-headline fade-up d2">
+            <span className="wl-headline-line">Join the</span>
+            <span className="wl-headline-line">Sourcemax waitlist.</span>
+          </h1>
 
           <p className="wl-sub fade-up d3">
             Profile any YouTube channel — themes, claims, tone, evidence — with every line cited back to the exact timestamp.

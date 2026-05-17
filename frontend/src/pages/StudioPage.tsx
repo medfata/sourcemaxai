@@ -196,23 +196,33 @@ function clearStoredChannelMeta() {
 
 function metaFromSummary(channel: ChannelSummary): ChannelMeta {
   return {
+    kind: channel.kind,
     channel_id: channel.channel_id,
     channel_name: channel.channel_name,
     channel_handle: channel.channel_handle,
     avatar_url: channel.avatar_url,
     subscriber_count: channel.subscriber_count,
     total_video_count: channel.total_video_count,
+    playlist_id: channel.playlist_id,
+    playlist_title: channel.playlist_title,
+    owner_channel_id: channel.owner_channel_id,
+    owner_channel_name: channel.owner_channel_name,
   }
 }
 
 function summaryFromMeta(meta: ChannelMeta): ChannelSummary {
   return {
+    kind: meta.kind,
     channel_id: meta.channel_id,
     channel_name: meta.channel_name,
     channel_handle: meta.channel_handle,
     avatar_url: meta.avatar_url,
     subscriber_count: meta.subscriber_count,
     total_video_count: meta.total_video_count,
+    playlist_id: meta.playlist_id,
+    playlist_title: meta.playlist_title,
+    owner_channel_id: meta.owner_channel_id,
+    owner_channel_name: meta.owner_channel_name,
     video_count: 0,
     has_profile: false,
     latest_run_status: null,
@@ -943,7 +953,6 @@ export default function StudioPage({
           {view === 'videos' && selectedMeta && (
             <VideoSelectionPanel
               channel={selectedMeta}
-              summary={selectedChannel}
               onRunPipeline={handleRunPipeline}
               onSelectionChange={setSelectedTotal}
             />
@@ -1686,25 +1695,20 @@ function GroupWorkspace({
 
 function VideoSelectionPanel({
   channel,
-  summary,
   onRunPipeline,
   onSelectionChange,
 }: {
   channel: ChannelMeta
-  summary: ChannelSummary | null
   onRunPipeline: () => void
   onSelectionChange?: (total: number) => void
 }) {
   const PAGE_SIZE = 50
   const isPlaylistMode = (channel.kind ?? 'channel') === 'playlist'
   const [tab, setTab] = useState<'videos' | 'playlists' | 'shorts'>('videos')
-  const [counts, setCounts] = useState<{ videos: number; shorts: number; playlists: number } | null>(null)
   const [longVideos, setLongVideos] = useState<Video[]>([])
   const [shortVideos, setShortVideos] = useState<Video[]>([])
   const [longHasMore, setLongHasMore] = useState(false)
   const [shortHasMore, setShortHasMore] = useState(false)
-  const [longTotal, setLongTotal] = useState(0)
-  const [shortTotal, setShortTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -1730,23 +1734,11 @@ function VideoSelectionPanel({
       const longList = longRes.data?.videos ?? []
       setLongVideos(longList)
       setLongHasMore(longRes.data?.has_more ?? false)
-      setLongTotal(longRes.data?.total ?? longList.length)
       const persistedIds = selectionRes.data?.video_ids ?? []
       setSelectedIds(new Set(persistedIds))
       setLoading(false)
     }
     void load()
-    return () => {
-      cancelled = true
-    }
-  }, [channel.channel_id])
-
-  useEffect(() => {
-    let cancelled = false
-    void api.channelCounts(channel.channel_id).then((res) => {
-      if (cancelled) return
-      if (res.data) setCounts({ videos: res.data.videos, shorts: res.data.shorts, playlists: res.data.playlists })
-    })
     return () => {
       cancelled = true
     }
@@ -1804,7 +1796,6 @@ function VideoSelectionPanel({
         if (!res.ok || !res.data) return
         setShortVideos(res.data.videos)
         setShortHasMore(res.data.has_more)
-        setShortTotal(res.data.total)
       })
     }
   }, [tab, channel.channel_id, isPlaylistMode])
@@ -1826,12 +1817,6 @@ function VideoSelectionPanel({
     }
     setLoadingMore(false)
   }
-
-  const longCount =
-    counts?.videos ??
-    (longTotal > 0 ? longTotal : undefined) ??
-    summary?.video_count ??
-    longVideos.length
 
   const optimisticPlaylistCount = playlists
     .filter((playlist) => selectedPlaylistIds.has(playlist.id))
